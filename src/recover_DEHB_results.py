@@ -10,14 +10,21 @@ import re
 import torch
 import json
 import collections
+from pathlib import Path
 
 # Required for PyTorch 2.0+ secure loading
 torch.serialization.add_safe_globals([collections.deque])
 
+ROOT_DIR = Path(__file__).resolve().parents[1]
+LOG_DIR = ROOT_DIR / "outputs" / "logs"
+CONFIG_DIR = ROOT_DIR / "configs"
+DEHB_BASE_CKPT_PREFIX = ROOT_DIR / "outputs" / "checkpoints" / "dehb_base" / "trial"
+DEHB_EPI_CKPT_PREFIX = ROOT_DIR / "outputs" / "checkpoints" / "dehb_epi" / "trial"
+
 def recover_from_slurm_logs():
     """Scan logs, pick best BASE/EPI trial IDs, and export cleaned JSON results."""
     print("Scanning directory for SLURM output logs (*.txt, *.out)...")
-    log_files = glob.glob("*.txt") + glob.glob("*.out")
+    log_files = glob.glob(str(LOG_DIR / "*.txt")) + glob.glob(str(LOG_DIR / "*.out"))
     
     if not log_files:
         print("Error: No .txt or .out log files found in the current directory.")
@@ -99,8 +106,8 @@ def recover_from_slurm_logs():
         except Exception as e:
             print(f"Failed to load checkpoint: {e}")
 
-    extract_checkpoint("BASE POMP", best_base, "dehb_checkpoints_base/trial", "best_base_params.json")
-    extract_checkpoint("EPIPLEXITY POMP", best_epi, "dehb_checkpoints_epi/trial", "best_epiplexity_params.json")
+    extract_checkpoint("BASE POMP", best_base, str(DEHB_BASE_CKPT_PREFIX), str(CONFIG_DIR / "best_base_params.json"))
+    extract_checkpoint("EPIPLEXITY POMP", best_epi, str(DEHB_EPI_CKPT_PREFIX), str(CONFIG_DIR / "best_epiplexity_params.json"))
 
 if __name__ == "__main__":
     recover_from_slurm_logs()

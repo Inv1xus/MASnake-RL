@@ -23,8 +23,8 @@ from pathlib import Path
 DRIVE_MOUNT    = "/content/drive"
 DRIVE_SAVE_DIR = f"{DRIVE_MOUNT}/MyDrive/snake_hpo"
 
-LOCAL_DIRS  = ["dehb_checkpoints", "dehb_log_data"]
-LOCAL_FILES = ["best_snake_params.json"]
+LOCAL_DIRS  = ["outputs/checkpoints", "data/dehb", "outputs/models", "outputs/plots", "outputs/logs"]
+LOCAL_FILES = ["configs/best_base_params.json", "configs/best_epiplexity_params.json", "configs/best_snake_params.json"]
 
 
 # ─────────────────────────────────────────────────────────────────────────────

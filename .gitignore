@@ -1,8 +1,11 @@
 # Ignore all PyTorch model files
 *.pt
-final_checkpoints_epi_pomp/
-final_checkpoints_base_pomp432/
-training_plots/
+
+# Output folders (generated during training/renders)
+outputs/checkpoints/
+outputs/plots/snapshots/
+outputs/logs/
+
 # Python bytecode
 __pycache__/
 *.pyc
@@ -12,3 +15,7 @@ __pycache__/
 
 # Staging/Temp folders
 .codex_staging/
+
+# Local IDE/tooling caches
+.lsp/
+.clj-kondo/

@@ -11,12 +11,12 @@ Supports:
 Usage
 ─────
   # Locally:
-  python render_agent.py --checkpoint final_model.pt --opponent self --episodes 5
+    python src/render.py --checkpoint outputs/models/final_model_base_pompHPO500.pt --opponent self --episodes 5
 
   # In Colab (run as a cell):
   from render_agent import render
   render(
-      checkpoint  = "final_model.pt",
+    checkpoint  = "outputs/models/final_model_base_pompHPO500.pt",
       opponent    = "self",            # "random" | "self" | path to .pt file
       episodes    = 5,
       colab       = True,              # record to video instead of pygame window
@@ -143,7 +143,7 @@ def _frames_to_video(frames: list, video_path: str, fps: int = 10):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def render(
-    checkpoint:  str   = "final_model.pt",
+    checkpoint:  str   = "outputs/models/final_model_base_pompHPO500.pt",
     opponent:    str   = "self",
     episodes:    int   = 5,
     fps:         int   = 10,
@@ -327,7 +327,7 @@ def render(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Render a trained Snake agent")
-    parser.add_argument("--checkpoint", default="final_checkpoints/step_055M.pt",
+    parser.add_argument("--checkpoint", default="outputs/models/final_model_base_pompHPO500.pt",
                         help="Path to checkpoint .pt file")
     parser.add_argument("--opponent",   default="self",
                         help="'random', 'self', or path to opponent .pt file")
@@ -339,7 +339,7 @@ if __name__ == "__main__":
                         help="Output video path (Colab mode only)")
     parser.add_argument("--cell-size",  type=int, default=28,
                         help="Pygame cell size in pixels (local mode only)")
-    args = parser.parse_args(['--cell-size','40'])
+    args = parser.parse_args()
 
     render(
         checkpoint = args.checkpoint,

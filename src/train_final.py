@@ -13,6 +13,7 @@ import os
 import sys
 import time
 import random
+from pathlib import Path
 import numpy as np
 import torch
 import matplotlib.pyplot as plt
@@ -20,6 +21,10 @@ import matplotlib.ticker as mticker
 from IPython import display
 
 from async_vec_env import close_all_cached
+
+ROOT_DIR = Path(__file__).resolve().parents[1]
+CONFIG_DIR = ROOT_DIR / "configs"
+OUTPUTS_DIR = ROOT_DIR / "outputs"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -56,14 +61,14 @@ PRINT_EVERY            = 200_000
 CHECKPOINT_EVERY       = 5_000_000
 LIVE_PLOT_STEP_INTERVAL = 2_000_000
 PLOT_SAVE_EVERY        = 2_000_000
-PLOT_SNAPSHOT_DIR      = "training_plots"
+PLOT_SNAPSHOT_DIR      = OUTPUTS_DIR / "plots" / "snapshots"
 
 # ── DYNAMIC ROUTING MAP ──
 _PATHS = {
-    "base": {"params": "best_base_params.json", "final_model": "final_model_base.pt", "checkpoint_dir": "final_checkpoints_base", "plot_prefix": "base_"},
-    "epiplexity": {"params": "best_epiplexity_params.json", "final_model": "final_model_epi_HPO500.pt", "checkpoint_dir": "final_checkpoints_epi", "plot_prefix": "epi_"},
-    "base_pomp": {"params": "best_base_params.json", "final_model": "final_model_base_pompHPO500.pt", "checkpoint_dir": "final_checkpoints_base_pomp432", "plot_prefix": "base_pompHPO500_"},
-    "epiplexity_pomp": {"params": "best_epiplexity_params.json", "final_model": "final_model_epi_pomp.pt", "checkpoint_dir": "final_checkpoints_epi_pomp", "plot_prefix": "epi_pompHPO500_"},
+    "base": {"params": CONFIG_DIR / "best_base_params.json", "final_model": OUTPUTS_DIR / "models" / "final_model_base.pt", "checkpoint_dir": OUTPUTS_DIR / "checkpoints" / "final" / "base", "plot_prefix": "base_"},
+    "epiplexity": {"params": CONFIG_DIR / "best_epiplexity_params.json", "final_model": OUTPUTS_DIR / "models" / "final_model_epi_HPO500.pt", "checkpoint_dir": OUTPUTS_DIR / "checkpoints" / "final" / "epiplexity", "plot_prefix": "epi_"},
+    "base_pomp": {"params": CONFIG_DIR / "best_base_params.json", "final_model": OUTPUTS_DIR / "models" / "final_model_base_pompHPO500.pt", "checkpoint_dir": OUTPUTS_DIR / "checkpoints" / "final" / "base_pomp", "plot_prefix": "base_pompHPO500_"},
+    "epiplexity_pomp": {"params": CONFIG_DIR / "best_epiplexity_params.json", "final_model": OUTPUTS_DIR / "models" / "final_model_epi_pompHPO500.pt", "checkpoint_dir": OUTPUTS_DIR / "checkpoints" / "final" / "epiplexity_pomp", "plot_prefix": "epi_pompHPO500_"},
 }
 
 def _build_trainer(mode: str, best_params: dict, device: torch.device, seed: int):
@@ -225,7 +230,8 @@ def run(target_steps=TARGET_STEPS, checkpoint_every=CHECKPOINT_EVERY, print_ever
     trainer, cfg = _build_trainer(mode, best_params, device, FIXED_SEED)
     print(f"[Run] env_backend={cfg.env_backend}", flush=True)
 
-    dehb_ckpt = f"dehb_checkpoints/trial_{config_id}/state.pt"
+    dehb_root = OUTPUTS_DIR / "checkpoints" / ("dehb_epi" if "epiplexity" in mode else "dehb_base")
+    dehb_ckpt = dehb_root / f"trial_{config_id}" / "state.pt"
     try:
         if os.path.exists(paths["final_model"]): trainer.load_state(paths["final_model"]); print(f"Resuming from: {paths['final_model']}")
         elif os.path.exists(dehb_ckpt): trainer.load_state(dehb_ckpt); print(f"Resuming from DEHB checkpoint: {dehb_ckpt}")
@@ -247,7 +253,7 @@ def run(target_steps=TARGET_STEPS, checkpoint_every=CHECKPOINT_EVERY, print_ever
         trainer.save_state(paths["final_model"])
         print(f"\n{'=' * 60}\nTraining complete  [{mode.upper()}]\n  Total steps : {trainer.total_steps:,}\n  Final reward: {final_reward:.4f}\n  Wall time   : {(time.time() - t0) / 3600:.2f} hours\n  Saved to    : {paths['final_model']}\n{'=' * 60}")
         if fig is None or axes is None: fig, axes = _make_fig(mode)
-        plt.ioff(); _update_plot(fig, axes, trainer._metrics, target_steps, mode, show=False); curve_path = f"{paths['plot_prefix']}training_curve.png"
+        plt.ioff(); _update_plot(fig, axes, trainer._metrics, target_steps, mode, show=False); curve_path = OUTPUTS_DIR / "plots" / f"{paths['plot_prefix']}training_curve.png"
         fig.savefig(curve_path, dpi=150, bbox_inches="tight"); print(f"Plot saved to {curve_path}")
     finally: trainer.close(); close_all_cached()
 
