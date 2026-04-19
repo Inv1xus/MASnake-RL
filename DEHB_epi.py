@@ -1,3 +1,9 @@
+"""DEHB sweep for the Epiplexity POMDP trainer.
+
+This script defines the search space, evaluates one DEHB trial at a time,
+and writes the best result to JSON at the end of the run.
+"""
+
 import os
 import torch
 import ConfigSpace as CS
@@ -17,6 +23,7 @@ torch.serialization.add_safe_globals([collections.deque])
 
 
 def get_epiplexity_snake_space():
+    """Return the hyperparameter search space used for Epiplexity runs."""
     cs = CS.ConfigurationSpace()
     cs.add([
         # ── Core Optimization ──
@@ -48,6 +55,7 @@ def get_epiplexity_snake_space():
 
 
 def dehb_objective(config, fidelity, **kwargs):
+    """Evaluate one DEHB trial and return DEHB's expected fitness payload."""
     config_dict = dict(config)
     config_str = json.dumps(config_dict, sort_keys=True)
     config_id  = hashlib.md5(config_str.encode("utf-8")).hexdigest()[:8]
@@ -58,7 +66,7 @@ def dehb_objective(config, fidelity, **kwargs):
 
     trial_seed = int(config_id, 16) % 100_000
 
-    # ── HARDWARE & ARCHITECTURE CONSTRAINTS ──
+    # Keep infra-heavy knobs fixed so DEHB spends budget on policy quality.
     safe_params = dict(config_dict)
     safe_params.update({
         "gru_hidden": 512,         # Locked to your updated architecture

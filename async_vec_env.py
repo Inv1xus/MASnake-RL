@@ -87,6 +87,7 @@ def get_cached_vec_env(
         Full PPOConfig dict.  num_envs, num_workers, grid_height, grid_width,
         and seed are extracted here; the rest forwarded to AsyncVecEnv.
     """
+    # We key the cache only by structural params; reward values are hot-swapped.
     num_envs    = kwargs.get("num_envs",    256)
     num_workers = kwargs.get("num_workers", None)
     grid_h      = kwargs.get("grid_height", 18)
@@ -159,6 +160,7 @@ class TorchSnakeVecEnv:
         device,
         **kwargs,
     ):
+        """Initialize batched torch state buffers and per-env simulation tensors."""
         self.num_envs = int(num_envs)
         self.device = torch.device(device)
         self.W = int(kwargs.get("grid_width", 24))

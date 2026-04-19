@@ -32,6 +32,7 @@ from async_vec_env import AsyncVecEnv, C, META_DIM, get_cached_vec_env, _REWARD_
 
 @torch.jit.script
 def _gae_jit(rb_v, rb_r, rb_d, last_v, gamma: float, gae_lambda: float):
+    """Compute GAE advantages and returns on-device for a full rollout batch."""
     nxt_v = torch.cat([rb_v[1:], last_v.unsqueeze(0)], dim=0)
     not_done = 1.0 - rb_d
     deltas = rb_r + gamma * nxt_v * not_done - rb_v
@@ -44,6 +45,7 @@ def _gae_jit(rb_v, rb_r, rb_d, last_v, gamma: float, gae_lambda: float):
     return advantages, advantages + rb_v
 
 def layer_init(layer, std=np.sqrt(2)):
+    """Orthogonal init with a configurable output scale."""
     torch.nn.init.orthogonal_(layer.weight, std)
     torch.nn.init.constant_(layer.bias, 0.0)
     return layer
@@ -53,6 +55,7 @@ def layer_init(layer, std=np.sqrt(2)):
 # ─────────────────────────────────────────────────────────────────────────────
 
 class ActorCritic(nn.Module):
+    """CNN + scalar encoder policy/value network for feedforward PPO."""
     def __init__(self, grid_h=18, grid_w=24, in_channels=8, scalar_dim=10, hidden_dim=256):
         super().__init__()
         self.cnn = nn.Sequential(
@@ -141,6 +144,7 @@ class PPOConfig:
         return cls(**{k: v for k, v in config_data.items() if k in valid_keys})
 
 class StatefulSnakeTrainer:
+    """Main PPO training loop with rollout collection and update steps."""
     def __init__(self, config: PPOConfig, device: torch.device):
         self.config, self.device = config, device
         H, W, N, T, D = config.grid_height, config.grid_width, config.num_envs, config.rollout_steps, config.scalar_dim

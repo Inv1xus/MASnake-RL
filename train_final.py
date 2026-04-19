@@ -67,6 +67,7 @@ _PATHS = {
 }
 
 def _build_trainer(mode: str, best_params: dict, device: torch.device, seed: int):
+    """Build and configure the trainer class that matches the selected mode."""
     # ── A100 MIG (20GB VRAM) CONSTRAINTS ──
     # Scaled to perfectly saturate 1/4th of an A100's SMs while fitting in a 20GB slice
     mig20_params = {
@@ -121,6 +122,7 @@ def _build_trainer(mode: str, best_params: dict, device: torch.device, seed: int
         return StatefulSnakeTrainer(cfg, device), cfg
 
 def _make_fig(mode: str):
+    """Create a consistent matplotlib layout for live and saved training curves."""
     if "epiplexity" in mode:
         fig, axes = plt.subplots(2, 3, figsize=(17, 8))
         titles = ["Mean Episode Reward", "Policy Loss", "Value Loss", "Entropy", "IDM Loss", "Episode Length"]
@@ -171,6 +173,7 @@ def _update_plot(fig, axes, metrics, target_steps, mode: str, show: bool = True)
     if show: display.clear_output(wait=True); display.display(fig)
 
 def _make_callback(target_steps, print_every, checkpoint_every, checkpoint_dir, plot_prefix, live_plot, fig, axes, start_step, start_time, mode):
+    """Return the progress callback used by trainers to log/checkpoint/plot."""
     state = {"last_print": start_step, "last_checkpoint": start_step, "last_plot_save": start_step, "t0": start_time}
     def callback(trainer):
         steps, metrics = trainer.total_steps, trainer._metrics
@@ -201,6 +204,7 @@ def _make_callback(target_steps, print_every, checkpoint_every, checkpoint_dir, 
     return callback
 
 def run(target_steps=TARGET_STEPS, checkpoint_every=CHECKPOINT_EVERY, print_every=PRINT_EVERY, custom_params_path=None, mode=MODE) -> None:
+    """Main training entrypoint shared by CLI and notebook usage."""
     # 1. Engage global determinism BEFORE loading networks or environments
     set_global_seed(FIXED_SEED)
 

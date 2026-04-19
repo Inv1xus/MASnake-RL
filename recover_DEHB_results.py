@@ -1,3 +1,9 @@
+"""Recover best DEHB trials by parsing SLURM logs and checkpoints.
+
+Useful when a run was interrupted but trial logs and checkpoint folders were
+already written to disk.
+"""
+
 import os
 import glob
 import re
@@ -9,6 +15,7 @@ import collections
 torch.serialization.add_safe_globals([collections.deque])
 
 def recover_from_slurm_logs():
+    """Scan logs, pick best BASE/EPI trial IDs, and export cleaned JSON results."""
     print("Scanning directory for SLURM output logs (*.txt, *.out)...")
     log_files = glob.glob("*.txt") + glob.glob("*.out")
     
@@ -16,13 +23,13 @@ def recover_from_slurm_logs():
         print("Error: No .txt or .out log files found in the current directory.")
         return
 
-    # Regex to match the manual print statements we injected
+    # Match exactly the per-trial summary line printed by DEHB objective calls.
     pattern = re.compile(r">>> \[(BASE|EPI) Trial ([a-f0-9]+)\] Finished\. Rew: ([-\.\d]+) \| Len: ([-\.\d]+) \| Fitness: ([-\.\d]+)")
 
     best_base = {"fitness": float('inf'), "id": None, "rew": None}
     best_epi  = {"fitness": float('inf'), "id": None, "rew": None}
 
-    # 1. Parse all text logs to find the absolute best Trial IDs
+    # Pass 1: parse logs and keep the best trial ID per model family.
     for file in log_files:
         try:
             with open(file, "r", encoding="utf-8") as f:
@@ -34,7 +41,7 @@ def recover_from_slurm_logs():
                         rew        = float(match.group(3))
                         fitness    = float(match.group(5))
 
-                        # Skip crashed trials (-2.0 penalty)
+                        # A fitness of 2.0 is our sentinel for failed trial execution.
                         if fitness == 2.0: continue 
 
                         if model_type == "BASE" and fitness < best_base["fitness"]:
@@ -44,7 +51,7 @@ def recover_from_slurm_logs():
         except Exception as e:
             print(f"Could not read {file}: {e}")
 
-    # 2. Extract configurations directly from the PyTorch Checkpoints
+    # Pass 2: pull the final hyperparameters straight from the winning checkpoint.
     def extract_checkpoint(model_name, best_data, ckpt_dir_prefix, out_json):
         print("\n" + "=" * 60)
         if best_data["id"] is None:

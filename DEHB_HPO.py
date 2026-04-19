@@ -1,3 +1,9 @@
+"""DEHB sweep for the base POMDP trainer.
+
+This file keeps trial orchestration in one place: search space definition,
+trial objective, and best-parameter export.
+"""
+
 import os
 import torch
 import ConfigSpace as CS
@@ -16,6 +22,7 @@ torch.serialization.add_safe_globals([collections.deque])
 
 
 def get_base_snake_space():
+    """Return the hyperparameter space used for base-model HPO."""
     cs = CS.ConfigurationSpace()
     cs.add([
         # ── Base Core Optimization ──
@@ -43,6 +50,7 @@ def get_base_snake_space():
 
 
 def dehb_objective(config, fidelity, **kwargs):
+    """Run one base-model trial at the requested fidelity and report fitness."""
     config_dict = dict(config)
     config_str = json.dumps(config_dict, sort_keys=True)
     config_id  = hashlib.md5(config_str.encode("utf-8")).hexdigest()[:8]
@@ -53,7 +61,7 @@ def dehb_objective(config, fidelity, **kwargs):
 
     trial_seed = int(config_id, 16) % 100_000
 
-    # ── HARDWARE CONSTRAINTS (NO GRU ARGS) ──
+    # Keep runtime knobs fixed so all trials are compared under the same budget.
     safe_params = dict(config_dict)
     safe_params.update({
         "env_backend": "torch",

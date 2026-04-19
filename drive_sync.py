@@ -46,6 +46,7 @@ def _mount_drive() -> bool:
 
 
 def _dir_size(path: Path) -> int:
+    """Return recursive size in bytes for a directory tree."""
     return sum(f.stat().st_size for f in path.rglob("*") if f.is_file())
 
 

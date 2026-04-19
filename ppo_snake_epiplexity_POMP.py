@@ -42,12 +42,14 @@ class EpiplexityConfig(PPOConfig):
         return cls(**{k: v for k, v in src.items() if k in valid})
 
 def _init_gru(cell: nn.GRUCell) -> None:
+    """Initialize GRU parameters with orthogonal weights and zero bias."""
     nn.init.orthogonal_(cell.weight_ih)
     nn.init.orthogonal_(cell.weight_hh)
     nn.init.zeros_(cell.bias_ih)
     nn.init.zeros_(cell.bias_hh)
 
 class RecurrentActorCritic(nn.Module):
+    """Recurrent policy/value network with IDM and tracking auxiliaries."""
     def __init__(
         self,
         grid_h:         int = 18,
@@ -122,6 +124,7 @@ class RecurrentActorCritic(nn.Module):
 
 
 class EpiplexityTrainer:
+    """Trainer for recurrent PPO with auxiliary tracking objectives."""
     def __init__(self, config: EpiplexityConfig, device: torch.device):
         self.config = config
         self.device = device

@@ -124,6 +124,7 @@ class SnakeGymEnv(gym.Env):
         seed: Optional[int] = None,
         options: Optional[Dict] = None,
     ) -> Tuple[dict, dict]:
+        """Reset env state and return the learning agent's first observation."""
         if seed is not None:
             self._env.rng = random.Random(seed)
 
@@ -184,9 +185,11 @@ class SnakeGymEnv(gym.Env):
         return obs, reward, terminated, truncated, agent_info
 
     def render(self) -> None:
+        """Forward render call to the wrapped multi-agent environment."""
         self._env.render()
 
     def close(self) -> None:
+        """Close any render resources held by the wrapped environment."""
         self._env.close_render()
 
     # ── Convenience helpers ───────────────────────────────────────────────────

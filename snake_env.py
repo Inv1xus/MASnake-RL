@@ -21,6 +21,7 @@ SPEED_GROWTH = 1.05
 # ──────────────────────────────────────────────────────────────
 
 class Action(IntEnum):
+    """Discrete movement actions supported by both agents."""
     UP    = 0
     DOWN  = 1
     LEFT  = 2
@@ -48,6 +49,7 @@ _OPPOSITE = {
 
 @dataclass
 class SnakeAgent:
+    """Mutable per-agent state container used inside each environment step."""
     agent_id:   int
     body:       List[Tuple[int, int]]
     direction:  Action
@@ -78,6 +80,7 @@ class SnakeAgent:
 # ──────────────────────────────────────────────────────────────
 
 class MultiAgentSnakeEnv:
+    """Two-player Snake environment with reward shaping and optional speed mode."""
 
     N_CHANNELS = 8
 
@@ -121,6 +124,7 @@ class MultiAgentSnakeEnv:
     # ──────────────────────────────────────────────────────────
 
     def reset(self) -> Dict[int, dict]:
+        """Reset board state and return observations for both agents."""
         cy = self.H // 2
         q1 = max(2, self.W // 4)
         q3 = min(self.W - 3, 3 * self.W // 4)
@@ -154,6 +158,7 @@ class MultiAgentSnakeEnv:
     def step(
         self, actions: Dict[int, int]
     ) -> Tuple[Dict[int, dict], Dict[int, float], Dict[int, bool], Dict[int, dict]]:
+        """Advance one tick using actions for alive agents and return Gym-style outputs."""
         if self.done:
             raise RuntimeError("Episode done — call reset() first.")
 

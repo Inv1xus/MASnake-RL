@@ -1,1 +1,0 @@
-#tail -f /speed-scratch/t_awaad/ChatGPT/slurm-899461.out

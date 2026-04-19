@@ -55,6 +55,7 @@ class EpiplexityConfig(PPOConfig):
 
 
 def _init_gru(cell: nn.GRUCell) -> None:
+    """Initialize GRU weights with stable orthogonal defaults."""
     nn.init.orthogonal_(cell.weight_ih)
     nn.init.orthogonal_(cell.weight_hh)
     nn.init.zeros_(cell.bias_ih)
@@ -66,6 +67,7 @@ def _init_gru(cell: nn.GRUCell) -> None:
 # ─────────────────────────────────────────────────────────────────────────────
 
 class RecurrentActorCritic(nn.Module):
+    """Recurrent actor-critic with auxiliary heads for Epiplexity training."""
     def __init__(
         self,
         grid_h:         int = 18,
@@ -149,6 +151,7 @@ class RecurrentActorCritic(nn.Module):
 # ─────────────────────────────────────────────────────────────────────────────
 
 class EpiplexityTrainer:
+    """Collect recurrent rollouts and optimize PPO + auxiliary losses."""
     def __init__(self, config: EpiplexityConfig, device: torch.device):
         self.config = config
         self.device = device
