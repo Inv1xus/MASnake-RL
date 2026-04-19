@@ -1,0 +1,31 @@
+{
+    "best_reward": 31.76,
+    "fitness_score": -66.4529,
+    "hyperparameters": {
+        "grid_width": 24,
+        "grid_height": 18,
+        "in_channels": 8,
+        "scalar_dim": 10,
+        "num_workers": 8,
+        "seed": 95547,
+        "lr": 7.83019111e-05,
+        "lr_min": 2.4499967e-06,
+        "gamma": 0.9663168509274,
+        "gae_lambda": 0.8498003305067,
+        "clip_eps": 0.1641139401181,
+        "value_loss_coef": 0.2527135393523,
+        "entropy_coef": 0.0504446897443,
+        "entropy_coef_final": 0.0026437478389,
+        "max_grad_norm": 0.5,
+        "update_epochs": 3,
+        "opponent_pool_size": 20,
+        "opponent_pool_update_freq": 15,
+        "opponent_pool_frac": 0.7156195469671,
+        "opponent_epsilon": 0.0,
+        "survival_reward": 0.0020718749876,
+        "food_reward": 2.9685026462972,
+        "death_penalty": -1.449108228387,
+        "win_reward": 0.7841088058716,
+        "distance_shaping": 0.057870301577
+    }
+}

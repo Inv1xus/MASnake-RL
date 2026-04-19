@@ -1,0 +1,20 @@
+{
+    "best_reward": 5.305494888424874,
+    "hyperparameters": {
+        "clip_eps": 0.2813681062292,
+        "death_penalty": -0.2535253652399,
+        "distance_shaping": 0,
+        "entropy_coef": 0.1045611616605,
+        "entropy_coef_final": 0.02,
+        "food_reward": 2.6843282483025,
+        "gae_lambda": 0.8699030699827,
+        "gamma": 0.9336680303104,
+        "lr": 0.0002688537459,
+        "lr_min": 5.412051e-07,
+        "opponent_pool_frac": 0.3803884072946,
+        "survival_reward": -0.0127977323874,
+        "update_epochs": 3,
+        "value_loss_coef": 0.3792556526732,
+        "win_reward": 1.4315147952696
+    }
+}

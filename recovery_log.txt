@@ -1,0 +1,13 @@
+Scanning directory for SLURM output logs (*.txt, *.out)...
+
+============================================================
+[BASE POMP] Winning Trial ID: 7f9e867b
+[BASE POMP] Winning Reward:   31.76 (Fitness: -66.4529)
+🏆 Successfully pried hyperparameters from PyTorch checkpoint!
+Saved to 'best_base_params.json'
+
+============================================================
+[EPIPLEXITY POMP] Winning Trial ID: 1983e822
+[EPIPLEXITY POMP] Winning Reward:   25.32 (Fitness: -54.7556)
+🏆 Successfully pried hyperparameters from PyTorch checkpoint!
+Saved to 'best_epiplexity_params.json'

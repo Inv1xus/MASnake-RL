@@ -1,2 +1,14 @@
 # Ignore all PyTorch model files
 *.pt
+final_checkpoints_epi_pomp/
+final_checkpoints_base_pomp432/
+training_plots/
+# Python bytecode
+__pycache__/
+*.pyc
+
+# OS generated files
+.DS_Store
+
+# Staging/Temp folders
+.codex_staging/

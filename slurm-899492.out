@@ -1,0 +1,87 @@
+
+[Diagnostic] Script loaded. Bypassing OS buffer...
+[Diagnostic] Directories verified. Loading config space...
+[Diagnostic] Initializing DEHB optimizer... (If the script freezes here, it is an NFS/Dask network block)
+
+============================================================
+EPIPLEXITY HPO STARTING... (Ctrl+C to stop and get results)
+============================================================
+
+>>> [EPI Trial 1c2c4bed] Starting Fidelity: 6,666,666 steps
+>>> [EPI Trial 1c2c4bed] Finished. Rew: 0.01 | Len: 74.0 | Fitness: -14.8111
+[TorchSnakeVecEnv] Reusing cached env on cuda
+
+>>> [EPI Trial d7c538a3] Starting Fidelity: 6,666,666 steps
+>>> [EPI Trial d7c538a3] Finished. Rew: -2.65 | Len: 50.1 | Fitness: -7.3761
+[TorchSnakeVecEnv] Reusing cached env on cuda
+
+>>> [EPI Trial f964aea3] Starting Fidelity: 6,666,666 steps
+>>> [EPI Trial f964aea3] Finished. Rew: 0.61 | Len: 34.5 | Fitness: -7.5153
+[TorchSnakeVecEnv] Reusing cached env on cuda
+
+>>> [EPI Trial 87a319c0] Starting Fidelity: 6,666,666 steps
+>>> [EPI Trial 87a319c0] Finished. Rew: -1.97 | Len: 23.0 | Fitness: -2.6346
+[TorchSnakeVecEnv] Reusing cached env on cuda
+
+>>> [EPI Trial 122b518c] Starting Fidelity: 6,666,666 steps
+>>> [EPI Trial 122b518c] Finished. Rew: -0.10 | Len: 67.4 | Fitness: -13.3802
+[TorchSnakeVecEnv] Reusing cached env on cuda
+
+>>> [EPI Trial 1a8f070b] Starting Fidelity: 6,666,666 steps
+>>> [EPI Trial 1a8f070b] Finished. Rew: 1.78 | Len: 47.4 | Fitness: -11.2636
+[TorchSnakeVecEnv] Reusing cached env on cuda
+
+>>> [EPI Trial f115a54d] Starting Fidelity: 6,666,666 steps
+>>> [EPI Trial f115a54d] Finished. Rew: -4.66 | Len: 46.9 | Fitness: -4.7302
+[TorchSnakeVecEnv] Reusing cached env on cuda
+
+>>> [EPI Trial acf86674] Starting Fidelity: 6,666,666 steps
+>>> [EPI Trial acf86674] Finished. Rew: -1.01 | Len: 29.9 | Fitness: -4.9759
+[TorchSnakeVecEnv] Reusing cached env on cuda
+
+>>> [EPI Trial ffca159d] Starting Fidelity: 6,666,666 steps
+>>> [EPI Trial ffca159d] Finished. Rew: 0.99 | Len: 56.2 | Fitness: -12.2316
+[TorchSnakeVecEnv] Reusing cached env on cuda
+
+>>> [EPI Trial 1c2c4bed] Starting Fidelity: 20,000,000 steps
+>>> [EPI Trial 1c2c4bed] Finished. Rew: 1.30 | Len: 82.8 | Fitness: -17.8524
+[TorchSnakeVecEnv] Reusing cached env on cuda
+
+>>> [EPI Trial 122b518c] Starting Fidelity: 20,000,000 steps
+>>> [EPI Trial 122b518c] Finished. Rew: -0.17 | Len: 77.8 | Fitness: -15.3918
+[TorchSnakeVecEnv] Reusing cached env on cuda
+
+>>> [EPI Trial ffca159d] Starting Fidelity: 20,000,000 steps
+>>> [EPI Trial ffca159d] Finished. Rew: 10.18 | Len: 119.2 | Fitness: -34.0195
+[TorchSnakeVecEnv] Reusing cached env on cuda
+
+>>> [EPI Trial ffca159d] Starting Fidelity: 60,000,000 steps
+>>> [EPI Trial ffca159d] Finished. Rew: 17.04 | Len: 143.9 | Fitness: -45.8253
+[TorchSnakeVecEnv] Reusing cached env on cuda
+
+>>> [EPI Trial a0fb87ce] Starting Fidelity: 20,000,000 steps
+>>> [EPI Trial a0fb87ce] Finished. Rew: -1.31 | Len: 19.8 | Fitness: -2.6505
+[TorchSnakeVecEnv] Reusing cached env on cuda
+
+>>> [EPI Trial ccec07df] Starting Fidelity: 20,000,000 steps
+>>> [EPI Trial ccec07df] Finished. Rew: 3.70 | Len: 104.1 | Fitness: -24.5201
+[TorchSnakeVecEnv] Reusing cached env on cuda
+
+>>> [EPI Trial 4cbbd097] Starting Fidelity: 20,000,000 steps
+>>> [EPI Trial 4cbbd097] Finished. Rew: 1.15 | Len: 103.0 | Fitness: -21.7512
+[TorchSnakeVecEnv] Reusing cached env on cuda
+
+>>> [EPI Trial ccec07df] Starting Fidelity: 60,000,000 steps
+>>> [EPI Trial ccec07df] Finished. Rew: 7.60 | Len: 131.8 | Fitness: -33.9521
+[TorchSnakeVecEnv] Reusing cached env on cuda
+
+>>> [EPI Trial fa387c65] Starting Fidelity: 60,000,000 steps
+>>> [EPI Trial fa387c65] Finished. Rew: 6.85 | Len: 119.1 | Fitness: -30.6722
+[TorchSnakeVecEnv] Reusing cached env on cuda
+
+>>> [EPI Trial c63e1536] Starting Fidelity: 60,000,000 steps
+>>> [EPI Trial c63e1536] Finished. Rew: 24.91 | Len: 140.7 | Fitness: -53.0565
+[TorchSnakeVecEnv] Reusing cached env on cuda
+
+>>> [EPI Trial d6e13a69] Starting Fidelity: 60,000,000 steps
+slurmstepd: error: *** JOB 899492 ON speed-38 CANCELLED AT 2026-04-15T00:51:46 DUE TO TIME LIMIT ***
