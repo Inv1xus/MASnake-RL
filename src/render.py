@@ -1,27 +1,8 @@
 """
-render_agent.py
-===============
-Watch a trained Snake agent play.
-SPEEFD
-Supports:
-  • Local rendering via pygame window
-  • Google Colab rendering via virtual display (Xvfb) + video recording
-  • Three opponent modes: random, self (same checkpoint), vs another checkpoint
+Watch a trained Snake agent play back a set of episodes.
 
-Usage
-─────
-  # Locally:
-    python src/render.py --checkpoint outputs/models/final_model_base_pompHPO500.pt --opponent self --episodes 5
-
-  # In Colab (run as a cell):
-  from render_agent import render
-  render(
-    checkpoint  = "outputs/models/final_model_base_pompHPO500.pt",
-      opponent    = "self",            # "random" | "self" | path to .pt file
-      episodes    = 5,
-      colab       = True,              # record to video instead of pygame window
-      video_path  = "replay.mp4",
-  )
+Works locally via a pygame window and in Colab via a virtual display
+with video export. Supports random opponents, self-play, or a separate checkpoint.
 """
 
 import argparse
@@ -36,21 +17,15 @@ from snake_env import MultiAgentSnakeEnv, Action
 from ppo_snake_core import ActorCritic, PPOConfig
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Helpers
-# ─────────────────────────────────────────────────────────────────────────────
-
 def _load_network(checkpoint_path: str, device: torch.device) -> tuple:
-    """Load ActorCritic + PPOConfig from a checkpoint file."""
+    """Loads an ActorCritic network and its PPOConfig from a checkpoint file."""
     ckpt = torch.load(checkpoint_path, map_location=device, weights_only=False)
 
-    # Reconstruct config — checkpoints saved by train_final.py include config_dict
     cfg_dict = ckpt.get("config_dict", {})
-    # Strip non-PPOConfig keys that might have crept in
     import dataclasses
     valid_keys = {f.name for f in dataclasses.fields(PPOConfig)}
-    cfg_dict   = {k: v for k, v in cfg_dict.items() if k in valid_keys}
-    config     = PPOConfig(**cfg_dict)
+    cfg_dict = {k: v for k, v in cfg_dict.items() if k in valid_keys}
+    config = PPOConfig(**cfg_dict)
 
     network = ActorCritic(
         grid_h=config.grid_height,
@@ -61,16 +36,25 @@ def _load_network(checkpoint_path: str, device: torch.device) -> tuple:
     return network, config
 
 
-def _get_action(network, obs: dict, device: torch.device, W: int, H: int) -> int:
-    """Run one forward pass and return the greedy action (no sampling)."""
-    grid = torch.tensor(obs["grid"], dtype=torch.float32, device=device).unsqueeze(0)
+def _get_action(
+        network,
+        obs: dict,
+        device: torch.device,
+        W: int,
+        H: int) -> int:
+    """Runs one forward pass through the network and returns the greedy action."""
+    grid = torch.tensor(
+        obs["grid"],
+        dtype=torch.float32,
+        device=device).unsqueeze(0)
 
     d_oh = torch.zeros(4, device=device)
     d_oh[obs["direction"]] = 1.0
-    speed  = torch.tensor([obs["speed"]], dtype=torch.float32, device=device)
-    credit = torch.tensor([obs["speed_credit"]], dtype=torch.float32, device=device)
+    speed = torch.tensor([obs["speed"]], dtype=torch.float32, device=device)
+    credit = torch.tensor([obs["speed_credit"]],
+                          dtype=torch.float32, device=device)
     hx, hy = obs["head"]
-    walls  = torch.tensor([
+    walls = torch.tensor([
         hx / max(W - 1, 1),
         (W - 1 - hx) / max(W - 1, 1),
         hy / max(H - 1, 1),
@@ -83,12 +67,8 @@ def _get_action(network, obs: dict, device: torch.device, W: int, H: int) -> int
     return int(logits.argmax(dim=-1).item())
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Colab virtual display setup
-# ─────────────────────────────────────────────────────────────────────────────
-
 def _setup_colab_display():
-    """Start Xvfb virtual display for headless rendering in Colab."""
+    """Starts a virtual Xvfb display for headless rendering in Colab."""
     try:
         import subprocess
         subprocess.Popen(
@@ -100,17 +80,17 @@ def _setup_colab_display():
         time.sleep(0.5)
         print("[Render] Virtual display started on :99")
     except FileNotFoundError:
-        print("[Render] Xvfb not found — installing...")
+        print("[Render] Xvfb not found, installing...")
         os.system("apt-get install -y xvfb > /dev/null 2>&1")
         _setup_colab_display()
 
 
 def _frames_to_video(frames: list, video_path: str, fps: int = 10):
-    """Save a list of numpy RGB frames to an mp4 video."""
+    """Saves a list of numpy RGB frames to an mp4 video file."""
     try:
         import cv2
         H, W, _ = frames[0].shape
-        writer  = cv2.VideoWriter(
+        writer = cv2.VideoWriter(
             video_path,
             cv2.VideoWriter_fourcc(*"mp4v"),
             fps,
@@ -119,9 +99,10 @@ def _frames_to_video(frames: list, video_path: str, fps: int = 10):
         for frame in frames:
             writer.write(cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
         writer.release()
-        print(f"[Render] Video saved to {video_path}  ({len(frames)} frames, {fps} fps)")
+        print(
+            f"[Render] Video saved to {video_path}  ({len(frames)} frames, {fps} fps)")
     except ImportError:
-        print("[Render] cv2 not found — saving as GIF instead")
+        print("[Render] cv2 not found, saving as GIF instead")
         try:
             from PIL import Image
             gif_path = video_path.replace(".mp4", ".gif")
@@ -135,48 +116,41 @@ def _frames_to_video(frames: list, video_path: str, fps: int = 10):
             )
             print(f"[Render] GIF saved to {gif_path}")
         except ImportError:
-            print("[Render] Neither cv2 nor PIL available — cannot save video")
+            print("[Render] Neither cv2 nor PIL available, cannot save video")
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Main render function
-# ─────────────────────────────────────────────────────────────────────────────
 
 def render(
-    checkpoint:  str   = "outputs/models/final_model_base_pompHPO500.pt",
-    opponent:    str   = "self",
-    episodes:    int   = 5,
-    fps:         int   = 10,
-    colab:       bool  = False,
-    video_path:  str   = "replay.mp4",
-    cell_size:   int   = 28,
+    checkpoint: str = "outputs/models/final_model_base_pompHPO500.pt",
+    opponent: str = "self",
+    episodes: int = 5,
+    fps: int = 10,
+    colab: bool = False,
+    video_path: str = "replay.mp4",
+    cell_size: int = 28,
 ) -> None:
     """
-    Watch the trained agent play.
+    Watches the trained agent play a set number of episodes.
 
     Parameters
     ----------
     checkpoint : str
-        Path to the .pt checkpoint to render.
+        Path to the .pt checkpoint to load.
     opponent : str
-        "random"         — agent-1 picks random actions
-        "self"           — agent-1 uses the same checkpoint
-        "/path/to/b.pt"  — agent-1 uses a different checkpoint
+        "random" for random actions, "self" for same checkpoint, or a path to another .pt file.
     episodes : int
         Number of episodes to play.
     fps : int
-        Frames per second (local window speed / video fps).
+        Frames per second for the window speed or video fps.
     colab : bool
-        If True, use virtual display + record to video.
+        If True, use virtual display and record to video.
         If False, open a pygame window directly.
     video_path : str
-        Output path for the video (Colab mode only).
+        Output path for the video in Colab mode.
     cell_size : int
-        Pygame cell size in pixels (local mode only).
+        Pygame cell size in pixels for local mode.
     """
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # ── Load agent ────────────────────────────────────────────────────
     if not os.path.exists(checkpoint):
         print(f"[Render] Checkpoint not found: {checkpoint}")
         return
@@ -186,38 +160,36 @@ def render(
     W, H = config.grid_width, config.grid_height
     speed_mode = getattr(config, "speed_mode", True)
     if speed_mode:
-        print("[Render] Speed mode: ON — faster snakes act more per step")
+        print("[Render] Speed mode: ON, faster snakes act more per step")
     else:
         print("[Render] Speed mode: OFF")
 
-    # ── Load opponent ─────────────────────────────────────────────────
     if opponent == "random":
         opp_network = None
         print("[Render] Opponent: random")
     elif opponent == "self":
-        opp_network = agent   # same weights, separate forward calls
+        opp_network = agent
         print("[Render] Opponent: self-play (same checkpoint)")
     elif os.path.exists(opponent):
         opp_network, _ = _load_network(opponent, device)
         print(f"[Render] Opponent: {opponent}")
     else:
-        print(f"[Render] Opponent path not found: {opponent} — falling back to random")
+        print(
+            f"[Render] Opponent path not found: {opponent}, falling back to random")
         opp_network = None
 
-    # ── Environment ───────────────────────────────────────────────────
     env = MultiAgentSnakeEnv(
-        grid_width       = W,
-        grid_height      = H,
-        survival_reward  = config.survival_reward,
-        food_reward      = config.food_reward,
-        death_penalty    = config.death_penalty,
-        win_reward       = config.win_reward,
-        distance_shaping = config.distance_shaping,
-        speed_mode       = speed_mode,
-        seed             = 42,
+        grid_width=W,
+        grid_height=H,
+        survival_reward=config.survival_reward,
+        food_reward=config.food_reward,
+        death_penalty=config.death_penalty,
+        win_reward=config.win_reward,
+        distance_shaping=config.distance_shaping,
+        speed_mode=speed_mode,
+        seed=42,
     )
 
-    # ── Colab: virtual display setup ──────────────────────────────────
     if colab:
         _setup_colab_display()
 
@@ -225,37 +197,34 @@ def render(
     pygame.init()
     screen_w = W * cell_size + 16
     screen_h = H * cell_size + 16 + 72
-    screen   = pygame.display.set_mode((screen_w, screen_h))
-    pygame.display.set_caption("Snake RL — Replay")
-    clock    = pygame.time.Clock()
+    screen = pygame.display.set_mode((screen_w, screen_h))
+    pygame.display.set_caption("Snake RL, Replay")
+    clock = pygame.time.Clock()
 
-    all_frames  = []   # for Colab video
-    ep_rewards  = []
-    ep_lengths  = []
-    ep_winners  = []
+    all_frames = []
+    ep_rewards = []
+    ep_lengths = []
+    ep_winners = []
 
-    print(f"\n{'─'*50}")
+    print(f"\n{'_'*50}")
     print(f"  Rendering {episodes} episodes")
-    print(f"  Grid: {W}×{H}   FPS: {fps}")
-    print(f"{'─'*50}")
+    print(f"  Grid: {W}x{H}   FPS: {fps}")
+    print(f"{'_'*50}")
 
     for ep in range(episodes):
-        obs  = env.reset()
+        obs = env.reset()
         done = False
         ep_r = {0: 0.0, 1: 0.0}
         steps = 0
 
         while not done:
-            # Handle pygame quit
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     pygame.quit()
                     return
 
-            # Agent-0 action
             a0 = _get_action(agent, obs[0], device, W, H)
 
-            # Agent-1 action
             if opp_network is None:
                 a1 = random.randint(0, 3)
             else:
@@ -263,22 +232,21 @@ def render(
 
             actions = {0: a0, 1: a1}
 
-            # ── The Environment now natively handles Speed Mode internally ──
-            # 1 step() call = 1 global physics tick = 1 rendered frame.
+            # One step call equals one global physics tick and one rendered
+            # frame
             obs, rews, dones, _ = env.step(actions)
-            
+
             ep_r[0] += rews.get(0, 0.0)
             ep_r[1] += rews.get(1, 0.0)
-            done     = dones.get("__all__", False)
+            done = dones.get("__all__", False)
 
-            # Render frame
             env.render(cell_size=cell_size)
             pygame.display.flip()
-            
+
             if colab:
                 frame = pygame.surfarray.array3d(screen)
                 all_frames.append(np.transpose(frame, (1, 0, 2)))
-            
+
             clock.tick(fps)
             steps += 1
         winner = env.winner
@@ -298,55 +266,53 @@ def render(
 
     pygame.quit()
 
-    # ── Save video (Colab) ─────────────────────────────────────────────
     if colab and all_frames:
         _frames_to_video(all_frames, video_path, fps=fps)
-        # Display inline in Colab
         try:
             from IPython.display import Video, display as ipy_display
             ipy_display(Video(video_path, embed=True))
         except Exception:
             pass
 
-    # ── Summary ───────────────────────────────────────────────────────
-    wins  = sum(1 for w in ep_winners if w == 0)
+    wins = sum(1 for w in ep_winners if w == 0)
     draws = sum(1 for w in ep_winners if w is None)
-    print(f"\n{'─'*50}")
+    print(f"\n{'_'*50}")
     print(f"  Results over {episodes} episodes:")
     print(f"    Agent wins  : {wins}  ({100*wins/episodes:.0f}%)")
     print(f"    Draws       : {draws}")
     print(f"    Losses      : {episodes - wins - draws}")
     print(f"    Mean reward : {np.mean(ep_rewards):+.3f}")
     print(f"    Mean length : {np.mean(ep_lengths):.0f} steps")
-    print(f"{'─'*50}")
+    print(f"{'_'*50}")
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# CLI entry point
-# ─────────────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Render a trained Snake agent")
-    parser.add_argument("--checkpoint", default="outputs/models/final_model_base_pompHPO500.pt",
-                        help="Path to checkpoint .pt file")
-    parser.add_argument("--opponent",   default="self",
+    parser = argparse.ArgumentParser(
+        description="Render a trained Snake agent")
+    parser.add_argument(
+        "--checkpoint",
+        default="outputs/models/final_model_base_pompHPO500.pt",
+        help="Path to checkpoint .pt file")
+    parser.add_argument("--opponent", default="self",
                         help="'random', 'self', or path to opponent .pt file")
-    parser.add_argument("--episodes",   type=int, default=5)
-    parser.add_argument("--fps",        type=int, default=10)
-    parser.add_argument("--colab",      action="store_true",
-                        help="Use virtual display + record video (for Colab)")
-    parser.add_argument("--video",      default="replay.mp4",
+    parser.add_argument("--episodes", type=int, default=5)
+    parser.add_argument("--fps", type=int, default=10)
+    parser.add_argument(
+        "--colab",
+        action="store_true",
+        help="Use virtual display and record video (for Colab)")
+    parser.add_argument("--video", default="replay.mp4",
                         help="Output video path (Colab mode only)")
-    parser.add_argument("--cell-size",  type=int, default=28,
+    parser.add_argument("--cell-size", type=int, default=28,
                         help="Pygame cell size in pixels (local mode only)")
     args = parser.parse_args()
 
     render(
-        checkpoint = args.checkpoint,
-        opponent   = args.opponent,
-        episodes   = args.episodes,
-        fps        = args.fps,
-        colab      = args.colab,
-        video_path = args.video,
-        cell_size  = args.cell_size,
+        checkpoint=args.checkpoint,
+        opponent=args.opponent,
+        episodes=args.episodes,
+        fps=args.fps,
+        colab=args.colab,
+        video_path=args.video,
+        cell_size=args.cell_size,
     )

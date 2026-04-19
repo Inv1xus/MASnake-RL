@@ -1,38 +1,31 @@
 """
-drive_sync.py
-=============
-Utilities for saving and restoring DEHB checkpoints + log data
-to/from Google Drive in Colab.
+Google Drive sync utilities for Colab training sessions.
 
-Usage
-─────
-  # At the end of a training session — save everything to Drive:
-  from drive_sync import save_to_drive
-  save_to_drive()
-
-  # At the start of a new session — restore from Drive:
-  from drive_sync import load_from_drive
-  load_from_drive()
+Saves checkpoints and logs to Drive at the end of a session and
+restores them at the start of a new one.
 """
 
 import os
 import shutil
 from pathlib import Path
 
-# ── Paths ──────────────────────────────────────────────────────────────────
-DRIVE_MOUNT    = "/content/drive"
+DRIVE_MOUNT = "/content/drive"
 DRIVE_SAVE_DIR = f"{DRIVE_MOUNT}/MyDrive/snake_hpo"
 
-LOCAL_DIRS  = ["outputs/checkpoints", "data/dehb", "outputs/models", "outputs/plots", "outputs/logs"]
-LOCAL_FILES = ["configs/best_base_params.json", "configs/best_epiplexity_params.json", "configs/best_snake_params.json"]
+LOCAL_DIRS = [
+    "outputs/checkpoints",
+    "data/dehb",
+    "outputs/models",
+    "outputs/plots",
+    "outputs/logs"]
+LOCAL_FILES = [
+    "configs/best_base_params.json",
+    "configs/best_epiplexity_params.json",
+    "configs/best_snake_params.json"]
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Internal helpers
-# ─────────────────────────────────────────────────────────────────────────────
 
 def _mount_drive() -> bool:
-    """Mount Google Drive if not already mounted. Returns True on success."""
+    """Mounts Google Drive if not already mounted and returns True on success."""
     if Path(f"{DRIVE_MOUNT}/MyDrive").exists():
         print("[Drive] Already mounted")
         return True
@@ -46,11 +39,12 @@ def _mount_drive() -> bool:
 
 
 def _dir_size(path: Path) -> int:
-    """Return recursive size in bytes for a directory tree."""
+    """Returns the total size in bytes of all files under a directory tree."""
     return sum(f.stat().st_size for f in path.rglob("*") if f.is_file())
 
 
 def _print_drive_usage(drive_dir: str) -> None:
+    """Prints a summary of file sizes currently saved in the Drive folder."""
     total = 0
     print("\n[Drive] Saved files:")
     for p in sorted(Path(drive_dir).iterdir()):
@@ -61,11 +55,12 @@ def _print_drive_usage(drive_dir: str) -> None:
 
 
 def _print_local_summary() -> None:
+    """Prints a summary of what was just restored to the local filesystem."""
     print("\n[Local] Restored:")
     for dirname in LOCAL_DIRS:
         if Path(dirname).exists():
             size = _dir_size(Path(dirname))
-            n    = sum(1 for _ in Path(dirname).rglob("*") if _.is_file())
+            n = sum(1 for _ in Path(dirname).rglob("*") if _.is_file())
             print(f"  {dirname:30} {size / 1e6:8.1f} MB  ({n} files)")
     for fname in LOCAL_FILES:
         if Path(fname).exists():
@@ -73,25 +68,20 @@ def _print_local_summary() -> None:
             print(f"  {fname:30} {size / 1e3:8.1f} KB")
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Save
-# ─────────────────────────────────────────────────────────────────────────────
-
 def save_to_drive(
     drive_dir: str = DRIVE_SAVE_DIR,
-    compress:  bool = True,
+    compress: bool = True,
 ) -> None:
     """
-    Save DEHB checkpoints, log data, and best params to Google Drive.
+    Saves DEHB checkpoints, log data, and best params to Google Drive.
 
     Parameters
     ----------
     drive_dir : str
-        Destination folder on Drive. Created if it doesn't exist.
+        Destination folder on Drive. Created if it does not exist.
     compress : bool
-        If True, zip directories before uploading (faster transfer,
-        less Drive quota). If False, copy files directly — slower but
-        no memory overhead and nothing to go wrong with zipping.
+        If True, zip directories before uploading for faster transfer.
+        If False, copy files directly with no memory overhead.
     """
     if not _mount_drive():
         return
@@ -99,7 +89,6 @@ def save_to_drive(
     os.makedirs(drive_dir, exist_ok=True)
     print(f"[Drive] Saving to {drive_dir} ...")
 
-    # ── Directories ────────────────────────────────────────────────
     for dirname in LOCAL_DIRS:
         if not Path(dirname).exists():
             print(f"  [skip] {dirname}/ not found locally")
@@ -107,7 +96,7 @@ def save_to_drive(
 
         if compress:
             zip_path = f"{dirname}.zip"
-            print(f"  Compressing {dirname}/ → {zip_path} ...")
+            print(f"  Compressing {dirname}/ to {zip_path} ...")
 
             try:
                 shutil.make_archive(dirname, "zip", dirname)
@@ -119,48 +108,47 @@ def save_to_drive(
                     if Path(dest).exists():
                         shutil.rmtree(dest)
                     shutil.copytree(dirname, dest)
-                    print(f"  ✓ {dest}/  (direct copy)")
+                    print(f"  done {dest}/  (direct copy)")
                 except Exception as e2:
                     print(f"  [ERROR] Direct copy also failed: {e2}")
                 continue
 
-            # Verify zip is non-empty before uploading
-            if not Path(zip_path).exists() or Path(zip_path).stat().st_size == 0:
+            if not Path(zip_path).exists() or Path(
+                    zip_path).stat().st_size == 0:
                 print(f"  [ERROR] Zip file missing or empty: {zip_path}")
                 continue
 
             zip_size_mb = Path(zip_path).stat().st_size / 1e6
-            print(f"  Zip size: {zip_size_mb:.1f} MB — uploading ...")
+            print(f"  Zip size: {zip_size_mb:.1f} MB, uploading ...")
 
             dest = f"{drive_dir}/{zip_path}"
             try:
                 shutil.copy(zip_path, dest)
             except Exception as e:
                 print(f"  [ERROR] Upload failed: {e}")
-                print(f"  Local zip kept at {zip_path} — copy manually")
+                print(f"  Local zip kept at {zip_path}, copy manually")
                 continue
 
-            # Verify Drive copy matches before deleting local zip
-            if (Path(dest).exists() and
-                    Path(dest).stat().st_size == Path(zip_path).stat().st_size):
+            # Verify the Drive copy matches before deleting the local zip
+            if (Path(dest).exists() and Path(dest).stat(
+            ).st_size == Path(zip_path).stat().st_size):
                 os.remove(zip_path)
-                print(f"  ✓ {dest}  ({zip_size_mb:.1f} MB)")
+                print(f"  done {dest}  ({zip_size_mb:.1f} MB)")
             else:
-                print(f"  [WARN] Drive copy size mismatch — keeping local zip at {zip_path}")
+                print(
+                    f"  [WARN] Drive copy size mismatch, keeping local zip at {zip_path}")
 
         else:
-            # Direct copy — no zip, no memory overhead
             dest = f"{drive_dir}/{dirname}"
-            print(f"  Copying {dirname}/ → {dest}/ ...")
+            print(f"  Copying {dirname}/ to {dest}/ ...")
             try:
                 if Path(dest).exists():
                     shutil.rmtree(dest)
                 shutil.copytree(dirname, dest)
-                print(f"  ✓ {dest}/")
+                print(f"  done {dest}/")
             except Exception as e:
                 print(f"  [ERROR] Failed to copy {dirname}: {e}")
 
-    # ── Loose files ────────────────────────────────────────────────
     for fname in LOCAL_FILES:
         if not Path(fname).exists():
             print(f"  [skip] {fname} not found locally")
@@ -168,7 +156,7 @@ def save_to_drive(
         dest = f"{drive_dir}/{fname}"
         try:
             shutil.copy(fname, dest)
-            print(f"  ✓ {dest}")
+            print(f"  done {dest}")
         except Exception as e:
             print(f"  [ERROR] Failed to copy {fname}: {e}")
 
@@ -177,25 +165,20 @@ def save_to_drive(
     _print_drive_usage(drive_dir)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Load
-# ─────────────────────────────────────────────────────────────────────────────
-
 def load_from_drive(
     drive_dir: str = DRIVE_SAVE_DIR,
     overwrite: bool = False,
 ) -> None:
     """
-    Restore DEHB checkpoints and log data from Google Drive.
+    Restores DEHB checkpoints and log data from Google Drive.
 
     Parameters
     ----------
     drive_dir : str
         Source folder on Drive.
     overwrite : bool
-        If False (default), skip items that already exist locally — safe
-        for resuming a session without clobbering anything.
-        If True, always overwrite local copies.
+        If False (default), skips items that already exist locally.
+        If True, always overwrites local copies.
     """
     if not _mount_drive():
         return
@@ -207,39 +190,40 @@ def load_from_drive(
 
     print(f"[Drive] Restoring from {drive_dir} ...")
 
-    # ── Directories (try zip first, fall back to folder) ───────────
+    # Try zip first, fall back to plain folder
     for dirname in LOCAL_DIRS:
         zip_src = f"{drive_dir}/{dirname}.zip"
         dir_src = f"{drive_dir}/{dirname}"
 
         if Path(zip_src).exists():
             if Path(dirname).exists() and not overwrite:
-                print(f"  [skip] {dirname}/ already exists locally (overwrite=False)")
+                print(
+                    f"  [skip] {dirname}/ already exists locally (overwrite=False)")
                 continue
             print(f"  Extracting {dirname}.zip ...")
             try:
                 shutil.unpack_archive(zip_src, dirname)
-                print(f"  ✓ {dirname}/")
+                print(f"  done {dirname}/")
             except Exception as e:
                 print(f"  [ERROR] Failed to extract {zip_src}: {e}")
 
         elif Path(dir_src).exists():
             if Path(dirname).exists() and not overwrite:
-                print(f"  [skip] {dirname}/ already exists locally (overwrite=False)")
+                print(
+                    f"  [skip] {dirname}/ already exists locally (overwrite=False)")
                 continue
             print(f"  Copying {dirname}/ ...")
             try:
                 if Path(dirname).exists():
                     shutil.rmtree(dirname)
                 shutil.copytree(dir_src, dirname)
-                print(f"  ✓ {dirname}/")
+                print(f"  done {dirname}/")
             except Exception as e:
                 print(f"  [ERROR] Failed to copy {dir_src}: {e}")
 
         else:
             print(f"  [skip] {dirname} not found on Drive")
 
-    # ── Loose files ────────────────────────────────────────────────
     for fname in LOCAL_FILES:
         src = f"{drive_dir}/{fname}"
         if not Path(src).exists():
@@ -250,7 +234,7 @@ def load_from_drive(
             continue
         try:
             shutil.copy(src, fname)
-            print(f"  ✓ {fname}")
+            print(f"  done {fname}")
         except Exception as e:
             print(f"  [ERROR] Failed to copy {fname}: {e}")
 
