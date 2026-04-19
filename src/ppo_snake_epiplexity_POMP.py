@@ -37,14 +37,34 @@ class EpiplexityConfig(PPOConfig):
 
     @classmethod
     def from_dict(cls, data: dict):
-        """Builds an EpiplexityConfig from a dict, ignoring unknown keys."""
+        """
+        Builds an EpiplexityConfig from a plain dict, ignoring unknown keys.
+
+        Args:
+            data (dict): a flat dict or one with a "hyperparameters" sub-dict.
+
+        Returns:
+            EpiplexityConfig: a new instance with values taken from data.
+
+        Example:
+            cfg = EpiplexityConfig.from_dict({"lr": 1e-4, "aux_loss_coef": 0.5})
+        """
         valid = {f.name for f in fields(cls)}
         src = data.get("hyperparameters", data)
         return cls(**{k: v for k, v in src.items() if k in valid})
 
 
 def _init_gru(cell: nn.GRUCell) -> None:
-    """Initializes GRU weights with orthogonal values and zero bias."""
+    """
+    Initializes GRU cell weights with orthogonal values and zero bias.
+
+    Args:
+        cell (nn.GRUCell): the GRU cell to initialize in place.
+
+    Example:
+        cell = nn.GRUCell(256, 512)
+        _init_gru(cell)
+    """
     nn.init.orthogonal_(cell.weight_ih)
     nn.init.orthogonal_(cell.weight_hh)
     nn.init.zeros_(cell.bias_ih)
@@ -52,7 +72,30 @@ def _init_gru(cell: nn.GRUCell) -> None:
 
 
 class RecurrentActorCritic(nn.Module):
-    """Recurrent policy and value network with IDM and opponent tracking auxiliary heads."""
+    """
+    Recurrent policy and value network with IDM and opponent tracking auxiliary heads.
+
+    Extends the fully observable variant with a fog of war observation and an
+    auxiliary head that predicts the opponent's position from the GRU hidden state.
+
+    Args:
+        grid_h (int): grid height in cells. Default 18.
+        grid_w (int): grid width in cells. Default 24.
+        in_channels (int): number of observation channels. Default 8.
+        scalar_dim (int): size of the scalar feature vector. Default 10.
+        hidden_dim (int): hidden units in the trunk layers. Default 256.
+        gru_hidden (int): size of the GRU hidden state. Default 512.
+        feat_dim (int): compressed feature dimension before the GRU. Default 256.
+
+    Example:
+        from ppo_snake_epiplexity_POMP import RecurrentActorCritic
+        import torch
+        net = RecurrentActorCritic()
+        grid = torch.zeros(1, 8, 18, 24)
+        scalars = torch.zeros(1, 10)
+        h = torch.zeros(1, 512)
+        a, lp, ent, v, h_new = net.get_action_and_value(grid, scalars, h)
+    """
 
     def __init__(
         self,
@@ -64,7 +107,18 @@ class RecurrentActorCritic(nn.Module):
         gru_hidden: int = 512,
         feat_dim: int = 256,
     ):
-        """Builds the CNN, scalar encoder, GRU, PPO heads, tracking head, and IDM head."""
+        """
+        Builds the CNN, scalar encoder, GRU, PPO heads, tracking head, and IDM head.
+
+        Args:
+            grid_h (int): grid height, used to compute CNN output size.
+            grid_w (int): grid width, used to compute CNN output size.
+            in_channels (int): number of input channels.
+            scalar_dim (int): scalar feature vector length.
+            hidden_dim (int): trunk layer width.
+            gru_hidden (int): GRU hidden state size.
+            feat_dim (int): bottleneck size between CNN and GRU.
+        """
         super().__init__()
         self.gru_hidden = gru_hidden
         self.feat_dim = feat_dim
@@ -129,22 +183,64 @@ class RecurrentActorCritic(nn.Module):
             self,
             grid: torch.Tensor,
             scalars: torch.Tensor) -> torch.Tensor:
-        """Passes the grid and scalars through encoders and returns a compressed feature vector."""
+        """
+        Encodes the grid and scalars into a compressed feature vector.
+
+        Args:
+            grid (Tensor): spatial observation, shape (B, C, H, W).
+            scalars (Tensor): scalar features, shape (B, scalar_dim).
+
+        Returns:
+            Tensor: compressed feature vector, shape (B, feat_dim).
+        """
         x = torch.cat([self.cnn(grid), self.scalar_net(scalars)], dim=-1)
         x = self.pre_norm(x)
         return self.compress(x)
 
     def gru_step(self, feat: torch.Tensor, h: torch.Tensor) -> torch.Tensor:
-        """Runs one GRU cell step and returns the updated hidden state."""
+        """
+        Runs one GRU cell step and returns the updated hidden state.
+
+        Args:
+            feat (Tensor): input feature vector, shape (B, feat_dim).
+            h (Tensor): previous hidden state, shape (B, gru_hidden).
+
+        Returns:
+            Tensor: new hidden state, shape (B, gru_hidden).
+        """
         return self.gru(feat, h.to(feat.dtype))
 
     def heads_from_feat_and_h(self, feat: torch.Tensor, h: torch.Tensor):
-        """Returns action logits, value estimate, and the auxiliary tracking prediction."""
+        """
+        Returns action logits, value estimate, and the auxiliary tracking prediction.
+
+        Args:
+            feat (Tensor): compressed feature vector, shape (B, feat_dim).
+            h (Tensor): GRU hidden state, shape (B, gru_hidden).
+
+        Returns:
+            tuple: (logits, value, aux_pred)
+                logits (Tensor): raw action scores, shape (B, 4).
+                value (Tensor): state value estimate, shape (B,).
+                aux_pred (Tensor): predicted opponent coordinates (x, y), shape (B, 2).
+        """
         t = self.trunk(torch.cat([feat, h], dim=-1))
         return self.actor(t), self.critic(t).squeeze(-1), self.aux_head(h)
 
     def get_action_and_value(self, grid, scalars, h, action=None):
-        """Extracts features, steps the GRU, then samples or evaluates an action."""
+        """
+        Extracts features, steps the GRU, then samples or evaluates an action.
+
+        Args:
+            grid (Tensor): spatial observation, shape (B, C, H, W).
+            scalars (Tensor): scalar features, shape (B, scalar_dim).
+            h (Tensor): previous GRU hidden state, shape (B, gru_hidden).
+            action (Tensor or None): if given, evaluates log prob. If None, samples.
+
+        Returns:
+            tuple: (action, log_prob, entropy, value, h_new) all shape (B,)
+                except h_new which is shape (B, gru_hidden).
+        """
         feat = self.extract_features(grid, scalars)
         h_new = self.gru_step(feat, h)
         logits, value, _ = self.heads_from_feat_and_h(feat, h_new)
@@ -157,7 +253,16 @@ class RecurrentActorCritic(nn.Module):
             self,
             h_t: torch.Tensor,
             h_t1: torch.Tensor) -> torch.Tensor:
-        """Predicts the action taken between hidden states h_t and h_t1."""
+        """
+        Predicts the action taken between two consecutive hidden states.
+
+        Args:
+            h_t (Tensor): GRU hidden state at time t, shape (B, gru_hidden).
+            h_t1 (Tensor): GRU hidden state at time t+1, shape (B, gru_hidden).
+
+        Returns:
+            Tensor: raw action logits, shape (B, 4).
+        """
         return self.idm_head(torch.cat([h_t, h_t1], dim=-1))
 
     def get_initial_state(self, batch_size: int, device) -> torch.Tensor:

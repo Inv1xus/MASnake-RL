@@ -28,7 +28,19 @@ DEHB_CKPT_DIR = ROOT_DIR / "outputs" / "checkpoints" / "dehb_epi"
 
 
 def get_epiplexity_snake_space():
-    """Returns the hyperparameter search space used for Epiplexity runs."""
+    """
+    Builds and returns the ConfigSpace for Epiplexity POMDP hyperparameter optimization.
+
+    Extends the base space with IDM coefficient, auxiliary loss weight, entropy
+    floor, and entropy boost to cover all recurrent trainer knobs.
+
+    Returns:
+        CS.ConfigurationSpace: the search space with 19 hyperparameters.
+
+    Example:
+        cs = get_epiplexity_snake_space()
+        print(cs)
+    """
     cs = CS.ConfigurationSpace()
     cs.add([
         CS.UniformFloatHyperparameter("lr", 1e-5, 3e-4, log=True),
@@ -55,7 +67,25 @@ def get_epiplexity_snake_space():
 
 
 def dehb_objective(config, fidelity, **kwargs):
-    """Evaluates one DEHB trial and returns the fitness payload expected by DEHB."""
+    """
+    Trains one Epiplexity trial at the requested fidelity and returns a fitness payload.
+
+    Loads any existing checkpoint for this config, trains until the fidelity step
+    budget is reached, saves the checkpoint, and returns the negated combined score
+    so DEHB minimizes it.
+
+    Args:
+        config (CS.Configuration): hyperparameter assignment sampled by DEHB.
+        fidelity (float): step budget for this trial, between min and max fidelity.
+        **kwargs: unused extra arguments passed by the DEHB scheduler.
+
+    Returns:
+        dict: keys "fitness" (float, lower is better) and "cost" (float, wall seconds).
+
+    Example:
+        result = dehb_objective(config, fidelity=10_000_000)
+        print(result["fitness"])
+    """
     config_dict = dict(config)
     config_str = json.dumps(config_dict, sort_keys=True)
     config_id = hashlib.md5(config_str.encode("utf-8")).hexdigest()[:8]

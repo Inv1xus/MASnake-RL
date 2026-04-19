@@ -18,7 +18,22 @@ from ppo_snake_core import ActorCritic, PPOConfig
 
 
 def _load_network(checkpoint_path: str, device: torch.device) -> tuple:
-    """Loads an ActorCritic network and its PPOConfig from a checkpoint file."""
+    """
+    Loads an ActorCritic network and its PPOConfig from a checkpoint.
+
+    Args:
+        checkpoint_path (str): path to a .pt file saved by StatefulSnakeTrainer.save_state.
+        device (torch.device): compute device for the loaded network.
+
+    Returns:
+        tuple: (network, config)
+            network (ActorCritic): loaded network set to eval mode.
+            config (PPOConfig): config stored alongside the weights.
+
+    Example:
+        import torch
+        net, cfg = _load_network("outputs/models/final_model_base.pt", torch.device("cpu"))
+    """
     ckpt = torch.load(checkpoint_path, map_location=device, weights_only=False)
 
     cfg_dict = ckpt.get("config_dict", {})
@@ -42,7 +57,20 @@ def _get_action(
         device: torch.device,
         W: int,
         H: int) -> int:
-    """Runs one forward pass through the network and returns the greedy action."""
+    """
+    Runs one greedy forward pass through the network.
+
+    Args:
+        network (ActorCritic): the policy network.
+        obs (dict): observation dict from MultiAgentSnakeEnv with keys
+            grid, direction, speed, speed_credit, head.
+        device (torch.device): device for tensor operations.
+        W (int): grid width, used to compute wall distance features.
+        H (int): grid height, used to compute wall distance features.
+
+    Returns:
+        int: action index (0=UP, 1=DOWN, 2=LEFT, 3=RIGHT) with the highest logit.
+    """
     grid = torch.tensor(
         obs["grid"],
         dtype=torch.float32,
@@ -68,7 +96,13 @@ def _get_action(
 
 
 def _setup_colab_display():
-    """Starts a virtual Xvfb display for headless rendering in Colab."""
+    """
+    Starts a virtual Xvfb display for headless rendering in Colab.
+
+    Sets the DISPLAY environment variable to :99 and sleeps briefly so
+    the server is ready before pygame initializes. Installs Xvfb via apt
+    if it is not already present. No return value.
+    """
     try:
         import subprocess
         subprocess.Popen(
@@ -86,7 +120,20 @@ def _setup_colab_display():
 
 
 def _frames_to_video(frames: list, video_path: str, fps: int = 10):
-    """Saves a list of numpy RGB frames to an mp4 video file."""
+    """
+    Saves a list of RGB frames to a video file on disk.
+
+    Falls back to GIF if cv2 is not available.
+
+    Args:
+        frames (list of np.ndarray): RGB images of shape (H, W, 3).
+        video_path (str): output path; should end in .mp4.
+        fps (int): playback speed in frames per second. Default 10.
+
+    Example:
+        frames = [np.zeros((720, 1280, 3), dtype=np.uint8)]
+        _frames_to_video(frames, "replay.mp4", fps=15)
+    """
     try:
         import cv2
         H, W, _ = frames[0].shape
@@ -129,25 +176,21 @@ def render(
     cell_size: int = 28,
 ) -> None:
     """
-    Watches the trained agent play a set number of episodes.
+    Watches the trained agent play a set number of episodes and prints results.
 
-    Parameters
-    ----------
-    checkpoint : str
-        Path to the .pt checkpoint to load.
-    opponent : str
-        "random" for random actions, "self" for same checkpoint, or a path to another .pt file.
-    episodes : int
-        Number of episodes to play.
-    fps : int
-        Frames per second for the window speed or video fps.
-    colab : bool
-        If True, use virtual display and record to video.
-        If False, open a pygame window directly.
-    video_path : str
-        Output path for the video in Colab mode.
-    cell_size : int
-        Pygame cell size in pixels for local mode.
+    Args:
+        checkpoint (str): path to the .pt checkpoint to load.
+        opponent (str): "random" for random actions, "self" for the same checkpoint,
+            or a file path to a different .pt checkpoint.
+        episodes (int): number of episodes to play. Default 5.
+        fps (int): frames per second for the pygame window or output video. Default 10.
+        colab (bool): if True, use a virtual display and record to video.
+            If False, open a pygame window directly. Default False.
+        video_path (str): output path for the video in Colab mode. Default "replay.mp4".
+        cell_size (int): pygame cell size in pixels for local mode. Default 28.
+
+    Example:
+        render(checkpoint="outputs/models/final_model_base.pt", episodes=3, fps=15)
     """
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 

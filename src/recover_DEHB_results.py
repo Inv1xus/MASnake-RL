@@ -25,7 +25,17 @@ DEHB_EPI_CKPT_PREFIX = ROOT_DIR / "outputs" / \
 
 
 def recover_from_slurm_logs():
-    """Scans SLURM logs, picks the best BASE and EPI trial IDs, and exports cleaned JSON results."""
+    """
+    Scans SLURM log files to find the best BASE and EPI trials and export their configs.
+
+    Reads every .txt and .out file in the log directory, parses the per-trial
+    summary lines, picks the winner for each model family, then loads the
+    corresponding checkpoint and writes a cleaned JSON to the configs directory.
+
+    Example:
+        recover_from_slurm_logs()
+        # writes configs/best_base_params.json and configs/best_epiplexity_params.json
+    """
     print("Scanning directory for SLURM output logs (*.txt, *.out)...")
     log_files = glob.glob(str(LOG_DIR / "*.txt")) + \
         glob.glob(str(LOG_DIR / "*.out"))
@@ -68,7 +78,17 @@ def recover_from_slurm_logs():
 
     # Pass 2: pull the final hyperparameters from the winning checkpoint
     def extract_checkpoint(model_name, best_data, ckpt_dir_prefix, out_json):
-        """Loads the best checkpoint for a model family and writes its config to JSON."""
+        """
+        Loads the winning checkpoint for one model family and exports its config.
+
+        Args:
+            model_name (str): display name used in print statements, e.g. "BASE POMP".
+            best_data (dict): dict with keys "id" (str trial hash), "fitness" (float),
+                and "rew" (float) from the log parsing pass.
+            ckpt_dir_prefix (str): filesystem prefix; the trial folder is
+                formed as prefix + "_" + trial_id.
+            out_json (str): path to write the extracted hyperparameters as JSON.
+        """
         print("\n" + "=" * 60)
         if best_data["id"] is None:
             print(f"No completed {model_name} trials found in the text logs.")

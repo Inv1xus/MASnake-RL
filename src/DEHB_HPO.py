@@ -27,7 +27,19 @@ DEHB_CKPT_DIR = ROOT_DIR / "outputs" / "checkpoints" / "dehb_base"
 
 
 def get_base_snake_space():
-    """Returns the hyperparameter search space used for base model HPO."""
+    """
+    Builds and returns the ConfigSpace for base POMDP model hyperparameter optimization.
+
+    The space covers learning rate, discount, GAE, PPO clipping, entropy,
+    reward shaping, and opponent pool fraction.
+
+    Returns:
+        CS.ConfigurationSpace: the search space with 15 hyperparameters.
+
+    Example:
+        cs = get_base_snake_space()
+        print(cs)
+    """
     cs = CS.ConfigurationSpace()
     cs.add([
         CS.UniformFloatHyperparameter("lr", 1e-5, 3e-4, log=True),
@@ -50,7 +62,25 @@ def get_base_snake_space():
 
 
 def dehb_objective(config, fidelity, **kwargs):
-    """Runs one base model trial at the requested fidelity and reports the fitness score."""
+    """
+    Trains one base POMDP trial at the requested fidelity and returns a fitness payload.
+
+    Loads any existing checkpoint for this config, trains until the fidelity step
+    budget is reached, saves the checkpoint, and returns the negated combined score
+    so DEHB minimizes it.
+
+    Args:
+        config (CS.Configuration): hyperparameter assignment sampled by DEHB.
+        fidelity (float): step budget for this trial, between min and max fidelity.
+        **kwargs: unused extra arguments passed by the DEHB scheduler.
+
+    Returns:
+        dict: keys "fitness" (float, lower is better) and "cost" (float, wall seconds).
+
+    Example:
+        result = dehb_objective(config, fidelity=15_000_000)
+        print(result["fitness"])
+    """
     config_dict = dict(config)
     config_str = json.dumps(config_dict, sort_keys=True)
     config_id = hashlib.md5(config_str.encode("utf-8")).hexdigest()[:8]

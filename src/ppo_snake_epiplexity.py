@@ -38,14 +38,34 @@ class EpiplexityConfig(PPOConfig):
 
     @classmethod
     def from_dict(cls, data: dict):
-        """Builds an EpiplexityConfig from a dict, ignoring unknown keys."""
+        """
+        Builds an EpiplexityConfig from a plain dict, ignoring unknown keys.
+
+        Args:
+            data (dict): a flat dict or one with a "hyperparameters" sub-dict.
+
+        Returns:
+            EpiplexityConfig: a new instance with values from data.
+
+        Example:
+            cfg = EpiplexityConfig.from_dict({"lr": 1e-4, "gru_hidden": 512})
+        """
         valid = {f.name for f in fields(cls)}
         src = data.get("hyperparameters", data)
         return cls(**{k: v for k, v in src.items() if k in valid})
 
 
 def _init_gru(cell: nn.GRUCell) -> None:
-    """Initializes GRU weights with orthogonal values and zero bias."""
+    """
+    Initializes GRU cell weights with orthogonal values and zero bias.
+
+    Args:
+        cell (nn.GRUCell): the GRU cell to initialize in place.
+
+    Example:
+        cell = nn.GRUCell(256, 512)
+        _init_gru(cell)
+    """
     nn.init.orthogonal_(cell.weight_ih)
     nn.init.orthogonal_(cell.weight_hh)
     nn.init.zeros_(cell.bias_ih)
@@ -53,7 +73,27 @@ def _init_gru(cell: nn.GRUCell) -> None:
 
 
 class RecurrentActorCritic(nn.Module):
-    """Recurrent actor-critic with an IDM auxiliary head for Epiplexity training."""
+    """
+    Recurrent actor-critic with a GRU memory cell and an IDM auxiliary head.
+
+    Args:
+        grid_h (int): grid height in cells. Default 18.
+        grid_w (int): grid width in cells. Default 24.
+        in_channels (int): number of observation channels. Default 8.
+        scalar_dim (int): size of the scalar feature vector. Default 10.
+        hidden_dim (int): hidden units in the trunk layers. Default 256.
+        gru_hidden (int): size of the GRU hidden state. Default 512.
+        feat_dim (int): compressed feature dimension before the GRU. Default 256.
+
+    Example:
+        from ppo_snake_epiplexity import RecurrentActorCritic
+        import torch
+        net = RecurrentActorCritic()
+        grid = torch.zeros(1, 8, 18, 24)
+        scalars = torch.zeros(1, 10)
+        h = torch.zeros(1, 512)
+        a, lp, ent, v, h_new = net.get_action_and_value(grid, scalars, h)
+    """
 
     def __init__(
         self,
@@ -65,7 +105,18 @@ class RecurrentActorCritic(nn.Module):
         gru_hidden: int = 512,
         feat_dim: int = 256,
     ):
-        """Builds the CNN, scalar encoder, GRU memory, PPO heads, and IDM head."""
+        """
+        Builds the CNN, scalar encoder, GRU memory, PPO heads, and IDM head.
+
+        Args:
+            grid_h (int): grid height, used to compute CNN output size.
+            grid_w (int): grid width, used to compute CNN output size.
+            in_channels (int): number of input channels.
+            scalar_dim (int): scalar feature vector length.
+            hidden_dim (int): trunk layer width.
+            gru_hidden (int): GRU hidden state size.
+            feat_dim (int): bottleneck size between CNN and GRU.
+        """
         super().__init__()
         self.gru_hidden = gru_hidden
         self.feat_dim = feat_dim
@@ -124,22 +175,63 @@ class RecurrentActorCritic(nn.Module):
             self,
             grid: torch.Tensor,
             scalars: torch.Tensor) -> torch.Tensor:
-        """Passes the grid and scalars through the CNN and scalar encoder, then compresses them."""
+        """
+        Encodes the grid and scalars into a compressed feature vector.
+
+        Args:
+            grid (Tensor): spatial observation, shape (B, C, H, W).
+            scalars (Tensor): scalar features, shape (B, scalar_dim).
+
+        Returns:
+            Tensor: compressed feature vector, shape (B, feat_dim).
+        """
         x = torch.cat([self.cnn(grid), self.scalar_net(scalars)], dim=-1)
         x = self.pre_norm(x)
         return self.compress(x)
 
     def gru_step(self, feat: torch.Tensor, h: torch.Tensor) -> torch.Tensor:
-        """Runs one GRU cell step and returns the updated hidden state."""
+        """
+        Runs one GRU cell step and returns the updated hidden state.
+
+        Args:
+            feat (Tensor): input feature vector, shape (B, feat_dim).
+            h (Tensor): previous hidden state, shape (B, gru_hidden).
+
+        Returns:
+            Tensor: new hidden state, shape (B, gru_hidden).
+        """
         return self.gru(feat, h.to(feat.dtype))
 
     def heads_from_feat_and_h(self, feat: torch.Tensor, h: torch.Tensor):
-        """Runs the shared trunk and returns action logits and value estimate."""
+        """
+        Runs the shared trunk and returns action logits and value estimate.
+
+        Args:
+            feat (Tensor): compressed feature vector, shape (B, feat_dim).
+            h (Tensor): GRU hidden state, shape (B, gru_hidden).
+
+        Returns:
+            tuple: (logits, value)
+                logits (Tensor): raw action scores, shape (B, 4).
+                value (Tensor): state value estimate, shape (B,).
+        """
         t = self.trunk(torch.cat([feat, h], dim=-1))
         return self.actor(t), self.critic(t).squeeze(-1)
 
     def get_action_and_value(self, grid, scalars, h, action=None):
-        """Extracts features, steps the GRU, then samples or evaluates an action."""
+        """
+        Extracts features, steps the GRU, then samples or evaluates an action.
+
+        Args:
+            grid (Tensor): spatial observation, shape (B, C, H, W).
+            scalars (Tensor): scalar features, shape (B, scalar_dim).
+            h (Tensor): previous GRU hidden state, shape (B, gru_hidden).
+            action (Tensor or None): if given, evaluates log prob for these actions.
+                If None, samples from the policy distribution.
+
+        Returns:
+            tuple: (action, log_prob, entropy, value, h_new) all shape (B,) except h_new (B, gru_hidden).
+        """
         feat = self.extract_features(grid, scalars)
         h_new = self.gru_step(feat, h)
         logits, value = self.heads_from_feat_and_h(feat, h_new)
@@ -152,19 +244,60 @@ class RecurrentActorCritic(nn.Module):
             self,
             h_t: torch.Tensor,
             h_t1: torch.Tensor) -> torch.Tensor:
-        """Predicts the action taken between hidden states h_t and h_t1."""
+        """
+        Predicts the action taken between two consecutive hidden states.
+
+        Args:
+            h_t (Tensor): GRU hidden state at time t, shape (B, gru_hidden).
+            h_t1 (Tensor): GRU hidden state at time t+1, shape (B, gru_hidden).
+
+        Returns:
+            Tensor: raw action logits, shape (B, 4).
+        """
         return self.idm_head(torch.cat([h_t, h_t1], dim=-1))
 
     def get_initial_state(self, batch_size: int, device) -> torch.Tensor:
-        """Returns a zeroed initial GRU hidden state for the given batch size."""
+        """
+        Returns a zeroed initial GRU hidden state for the given batch size.
+
+        Args:
+            batch_size (int): number of parallel environments or sequences.
+            device: torch device for the returned tensor.
+
+        Returns:
+            Tensor: zero tensor of shape (batch_size, gru_hidden).
+
+        Example:
+            h0 = net.get_initial_state(64, torch.device("cuda"))
+        """
         return torch.zeros(batch_size, self.gru_hidden, device=device)
 
 
 class EpiplexityTrainer:
-    """Collects recurrent rollouts and optimizes PPO plus the IDM auxiliary loss."""
+    """
+    Trainer for recurrent PPO with an Inverse Dynamics Model auxiliary loss.
+
+    Args:
+        config (EpiplexityConfig): full training configuration.
+        device (torch.device): compute device for the network and rollout buffers.
+
+    Example:
+        import torch
+        from ppo_snake_epiplexity import EpiplexityTrainer, EpiplexityConfig
+        cfg = EpiplexityConfig(num_envs=4, total_timesteps=100_000)
+        trainer = EpiplexityTrainer(cfg, torch.device("cpu"))
+        trainer.enable_tracking()
+        reward = trainer.train_chunk(100_000)
+    """
 
     def __init__(self, config: EpiplexityConfig, device: torch.device):
-        """Sets up the recurrent network, optimizer, environment, and rollout buffers."""
+        """
+        Sets up the recurrent network, optimizer, environment, and rollout buffers.
+
+        Args:
+            config (EpiplexityConfig): training configuration dataclass.
+            device (torch.device): where tensors and the network will live.
+        """
         self.config = config
         self.device = device
         H, W, N, T, D, GH = config.grid_height, config.grid_width, config.num_envs, config.rollout_steps, config.scalar_dim, config.gru_hidden
@@ -238,7 +371,16 @@ class EpiplexityTrainer:
         self._dynamic_ent_boost = 0.0
 
     def enable_tracking(self, progress_cb=None):
-        """Enables metric collection and optionally registers a progress callback."""
+        """
+        Enables metric collection and registers an optional progress callback.
+
+        Args:
+            progress_cb (callable or None): called after each update with the trainer
+                as the only argument. Default None.
+
+        Example:
+            trainer.enable_tracking(progress_cb=lambda t: print(t.total_steps))
+        """
         self._metrics = {
             "steps": [],
             "reward": [],
@@ -253,7 +395,19 @@ class EpiplexityTrainer:
         ), self.total_steps, progress_cb
 
     def train_chunk(self, target_steps: int) -> float:
-        """Collects recurrent rollouts and updates the network until total_steps reaches target_steps."""
+        """
+        Collects recurrent rollouts and runs PPO plus IDM updates until total_steps reaches target_steps.
+
+        Args:
+            target_steps (int): keep training until trainer.total_steps >= this value.
+
+        Returns:
+            float: mean episode reward over the last 100 completed episodes.
+
+        Example:
+            trainer.enable_tracking()
+            mean_reward = trainer.train_chunk(1_000_000)
+        """
         N, T, H, W, D, GH, L = self.config.num_envs, self.config.rollout_steps, self.config.grid_height, self.config.grid_width, self.config.scalar_dim, self.config.gru_hidden, self.config.bptt_seq_len
 
         while self.total_steps < target_steps:
@@ -374,7 +528,17 @@ class EpiplexityTrainer:
         return float(np.mean(self.ep_rews)) if self.ep_rews else 0.0
 
     def _ppo_update(self, adv, ret, l_mask):
-        """Reorganizes rollout data into BPTT sequences and runs the PPO update."""
+        """
+        Reorganizes rollout data into BPTT sequences and runs the PPO update.
+
+        Args:
+            adv (Tensor): GAE advantages, shape (T, N, 2).
+            ret (Tensor): discounted returns, shape (T, N, 2).
+            l_mask (Tensor): bool mask marking learner slots, shape (N, 2).
+
+        Returns:
+            tuple of float: (mean_policy_loss, mean_value_loss, mean_entropy).
+        """
         T, N, L, S, GH = self.config.rollout_steps, self.config.num_envs, self.config.bptt_seq_len, self.config.rollout_steps // self.config.bptt_seq_len, self.config.gru_hidden
         l_n, l_a = l_mask.nonzero(as_tuple=True)
         K = l_n.shape[0]
@@ -455,7 +619,23 @@ class EpiplexityTrainer:
             b_ret,
             h0,
             b_done):
-        """Runs one BPTT minibatch: extracts features in parallel, then unrolls the GRU sequentially."""
+        """
+        Runs one BPTT minibatch: CNN in parallel, GRU unrolled sequentially.
+
+        Args:
+            b_gs (Tensor): grid observations, shape (K, L, C, H, W).
+            b_ss (Tensor): scalar features, shape (K, L, scalar_dim).
+            b_acts (Tensor): actions, shape (K, L).
+            b_lp_old (Tensor): old log probs, shape (K, L).
+            b_v_old (Tensor): old value estimates, shape (K, L).
+            b_adv (Tensor): advantages, shape (K, L).
+            b_ret (Tensor): returns, shape (K, L).
+            h0 (Tensor): GRU start state for each sequence, shape (K, gru_hidden).
+            b_done (Tensor): episode-done flags, shape (K, L), bool.
+
+        Returns:
+            tuple of float: (policy_loss, value_loss, entropy).
+        """
         K, L = b_gs.shape[:2]
 
         with autocast("cuda", enabled=self._use_amp, dtype=self._amp_dtype):
@@ -523,7 +703,12 @@ class EpiplexityTrainer:
         return pi_loss.item(), v_loss.item(), ent_.item()
 
     def _idm_update(self):
-        """Samples random transitions and trains the IDM to predict the action between two consecutive states."""
+        """
+        Samples random transitions and trains the IDM to predict actions between consecutive states.
+
+        Returns:
+            float: mean IDM cross-entropy loss for this update, or 0.0 if no valid transitions exist.
+        """
         T, N = self.config.rollout_steps, self.config.num_envs
         IDM_BATCH = min(512, T * N // 4)
 
@@ -585,7 +770,14 @@ class EpiplexityTrainer:
         return idm_loss.item()
 
     def _shm_to_gpu(self):
-        """Copies shared memory observations to GPU tensors and builds the scalar feature vector."""
+        """
+        Copies shared memory observations to GPU and builds the scalar feature vector.
+
+        Returns:
+            tuple: (grids, scalars)
+                grids (Tensor): spatial observations, shape (N, 2, C, H, W).
+                scalars (Tensor): scalar features, shape (N, 2, scalar_dim).
+        """
         if self._is_torch_env:
             grids, meta = self.vec_env.torch_grids, self.vec_env.torch_meta
         else:
@@ -617,7 +809,15 @@ class EpiplexityTrainer:
         return grids.contiguous(), scalars.contiguous()
 
     def save_state(self, path: str):
-        """Saves the network, optimizer, config, training progress, and GRU state to a file."""
+        """
+        Saves a full checkpoint to disk including the GRU hidden state.
+
+        Args:
+            path (str): file path for the .pt checkpoint.
+
+        Example:
+            trainer.save_state("outputs/models/checkpoint_epi.pt")
+        """
         torch.save({"network": self._raw_network.state_dict(),
                     "optimizer": self.optimizer.state_dict(),
                     "config_dict": asdict(self.config),
@@ -629,7 +829,16 @@ class EpiplexityTrainer:
                    path)
 
     def load_state(self, path: str):
-        """Loads a checkpoint and restores network weights, optimizer, training counters, and GRU state."""
+        """
+        Loads a checkpoint and restores network, optimizer, counters, and GRU state.
+
+        Args:
+            path (str): path to a .pt file created by save_state.
+
+        Example:
+            trainer.load_state("outputs/models/checkpoint_epi.pt")
+            print(trainer.total_steps)
+        """
         ckpt = torch.load(path, map_location=self.device, weights_only=False)
         self._raw_network.load_state_dict(ckpt["network"])
         self.optimizer.load_state_dict(ckpt["optimizer"])
@@ -642,6 +851,8 @@ class EpiplexityTrainer:
             self._dynamic_ent_boost = ckpt["dynamic_ent_boost"]
 
     def close(self):
-        """Closes the vector environment if it exists."""
+        """
+        Closes the vector environment if it exists. Safe to call at any time.
+        """
         if hasattr(self, "vec_env") and self.vec_env is not None:
             self.vec_env.close()

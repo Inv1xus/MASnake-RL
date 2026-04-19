@@ -27,7 +27,15 @@ OUTPUTS_DIR = ROOT_DIR / "outputs"
 
 
 def set_global_seed(seed: int):
-    """Locks all internal random number generators to a single seed for strict determinism."""
+    """
+    Seeds Python, NumPy, and PyTorch RNGs for strict reproducibility.
+
+    Args:
+        seed (int): the seed value applied to all RNGs.
+
+    Example:
+        set_global_seed(42)
+    """
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -110,7 +118,23 @@ def _build_trainer(
         best_params: dict,
         device: torch.device,
         seed: int):
-    """Builds and configures the trainer class that matches the selected training mode."""
+    """
+    Builds and returns the trainer and config for the selected training mode.
+
+    Args:
+        mode (str): one of "base", "epiplexity", "base_pomp", "epiplexity_pomp".
+        best_params (dict): hyperparameters loaded from the HPO result JSON.
+        device (torch.device): compute device passed to the trainer.
+        seed (int): random seed applied to the config.
+
+    Returns:
+        tuple: (trainer, config) where trainer is a StatefulSnakeTrainer or
+            EpiplexityTrainer and config is the matching dataclass.
+
+    Example:
+        import torch
+        trainer, cfg = _build_trainer("base", {}, torch.device("cpu"), 0)
+    """
     # A100 MIG 20GB VRAM constraints: scaled to fit a 20GB memory slice
     mig20_params = {
         "num_envs": 512,
@@ -163,7 +187,21 @@ def _build_trainer(
 
 
 def _make_fig(mode: str):
-    """Creates a consistent matplotlib figure layout for live and saved training curves."""
+    """
+    Creates the training curve figure with one subplot per tracked metric.
+
+    Args:
+        mode (str): one of the four training modes; selects which metrics are shown.
+
+    Returns:
+        tuple: (fig, axes)
+            fig (matplotlib.figure.Figure): the figure object.
+            axes (list of Axes): flat list of subplot axes, one per metric.
+
+    Example:
+        fig, axes = _make_fig("base")
+        fig.savefig("training_curve.png")
+    """
     if "epiplexity" in mode:
         fig, axes = plt.subplots(2, 3, figsize=(17, 8))
         titles = [
@@ -206,7 +244,12 @@ def _make_fig(mode: str):
 
 
 def _should_live_plot() -> bool:
-    """Returns True if we are running inside a Jupyter notebook that supports live display."""
+    """
+    Checks whether the current runtime can show a live matplotlib figure.
+
+    Returns:
+        bool: True inside a Jupyter ZMQ shell, False in scripts or a plain terminal.
+    """
     if not sys.stdout.isatty():
         return False
     try:
@@ -222,7 +265,17 @@ def _update_plot(
         target_steps,
         mode: str,
         show: bool = True):
-    """Redraws the training curve figure with the latest metrics data."""
+    """
+    Redraws all training curve subplots with the latest metric values.
+
+    Args:
+        fig (Figure): the figure to update.
+        axes (list of Axes): flat list of subplot axes.
+        metrics (dict): training metrics collected by enable_tracking.
+        target_steps (int): total training budget, used to show completion percentage.
+        mode (str): selects which metric keys to read and display.
+        show (bool): if True, push the figure to the Jupyter display. Default True.
+    """
     if fig is None or axes is None:
         return
     steps = metrics["steps"]
@@ -277,7 +330,28 @@ def _make_callback(
         start_step,
         start_time,
         mode):
-    """Returns the progress callback used by trainers to log, checkpoint, and plot."""
+    """
+    Creates the progress callback passed to trainer.enable_tracking.
+
+    The returned function handles periodic console logging, checkpoint saving,
+    and plot snapshots based on step thresholds stored in a closure.
+
+    Args:
+        target_steps (int): total training budget in steps.
+        print_every (int): log a console line every this many steps.
+        checkpoint_every (int): save a .pt file every this many steps.
+        checkpoint_dir (Path): directory for checkpoint files.
+        plot_prefix (str): filename prefix for plot snapshot files.
+        live_plot (bool): whether to push updated plots to the Jupyter display.
+        fig (Figure or None): figure for live plotting; None disables it.
+        axes (list or None): subplot axes matching fig.
+        start_step (int): step count at the start of this run.
+        start_time (float): wall time at the start of this run.
+        mode (str): training mode, used to pick metric keys in _update_plot.
+
+    Returns:
+        callable: a function that takes a trainer instance and handles all logging.
+    """
     state = {
         "last_print": start_step,
         "last_checkpoint": start_step,
@@ -285,7 +359,12 @@ def _make_callback(
         "t0": start_time}
 
     def callback(trainer):
-        """Handles periodic logging, checkpointing, and plot saving during training."""
+        """
+        Handles periodic logging, checkpointing, and plot saving during training.
+
+        Args:
+            trainer: a StatefulSnakeTrainer or EpiplexityTrainer instance.
+        """
         steps, metrics = trainer.total_steps, trainer._metrics
         if steps - state["last_print"] >= print_every:
             elapsed, steps_done = time.time() - state["t0"], steps - start_step
@@ -349,7 +428,22 @@ def run(
         print_every=PRINT_EVERY,
         custom_params_path=None,
         mode=MODE) -> None:
-    """Main training entrypoint shared by the CLI and notebook usage."""
+    """
+    Main training entrypoint for both CLI and notebook use.
+
+    Loads hyperparameters from JSON, builds the trainer, resumes from a
+    checkpoint if one exists, then runs until target_steps is reached.
+
+    Args:
+        target_steps (int): total environment steps to train for.
+        checkpoint_every (int): save a checkpoint every this many steps.
+        print_every (int): print a progress line every this many steps.
+        custom_params_path (str or None): override the default JSON param file.
+        mode (str): one of "base", "epiplexity", "base_pomp", "epiplexity_pomp".
+
+    Example:
+        run(target_steps=10_000_000, mode="base")
+    """
     # Engage global determinism before loading networks or environments
     set_global_seed(FIXED_SEED)
 

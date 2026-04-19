@@ -24,7 +24,23 @@ from async_vec_env import C, META_DIM, get_cached_vec_env, _REWARD_KEYS
 
 @torch.jit.script
 def _gae_jit(rb_v, rb_r, rb_d, last_v, gamma: float, gae_lambda: float):
-    """Computes GAE advantages and returns for batched PPO rollouts."""
+    """
+    Computes GAE advantages and discounted returns for a rollout buffer.
+
+    Args:
+        rb_v (Tensor): value estimates, shape (T, N, 2).
+        rb_r (Tensor): rewards, shape (T, N, 2).
+        rb_d (Tensor): done flags, shape (T, N, 2).
+        last_v (Tensor): bootstrap value at the end of the rollout, shape (N, 2).
+        gamma (float): discount factor.
+        gae_lambda (float): GAE trace decay parameter.
+
+    Returns:
+        tuple: (advantages, returns) both shape (T, N, 2).
+
+    Example:
+        adv, ret = _gae_jit(values, rewards, dones, last_val, 0.995, 0.95)
+    """
     nxt_v = torch.cat([rb_v[1:], last_v.unsqueeze(0)], dim=0)
     not_done = 1.0 - rb_d
     deltas = rb_r + gamma * nxt_v * not_done - rb_v
@@ -38,14 +54,42 @@ def _gae_jit(rb_v, rb_r, rb_d, last_v, gamma: float, gae_lambda: float):
 
 
 def layer_init(layer, std=np.sqrt(2)):
-    """Applies orthogonal initialization used across all policy and value heads."""
+    """
+    Initializes a linear or conv layer with orthogonal weights and zero bias.
+
+    Args:
+        layer (nn.Module): a PyTorch layer with weight and bias attributes.
+        std (float): gain for orthogonal initialization. Default sqrt(2).
+
+    Returns:
+        nn.Module: the same layer, initialized in place.
+
+    Example:
+        fc = layer_init(nn.Linear(256, 4), std=0.01)
+    """
     torch.nn.init.orthogonal_(layer.weight, std)
     torch.nn.init.constant_(layer.bias, 0.0)
     return layer
 
 
 class ActorCritic(nn.Module):
-    """Feedforward actor-critic used as the POMDP control baseline."""
+    """
+    Feedforward actor-critic used as the POMDP control baseline.
+
+    Applies fog-of-war-blinded observations but otherwise shares the same
+    CNN trunk design as the fully observable variant.
+
+    Args:
+        grid_h (int): grid height in cells. Default 18.
+        grid_w (int): grid width in cells. Default 24.
+        in_channels (int): number of input observation channels. Default 8.
+        scalar_dim (int): length of the scalar feature vector. Default 10.
+        hidden_dim (int): width of the shared trunk layers. Default 256.
+
+    Example:
+        net = ActorCritic()
+        logits, value = net(grid, scalars)
+    """
 
     def __init__(
             self,
@@ -54,7 +98,16 @@ class ActorCritic(nn.Module):
             in_channels=8,
             scalar_dim=10,
             hidden_dim=256):
-        """Builds the CNN, scalar encoder, trunk, actor, and critic heads."""
+        """
+        Builds the CNN, scalar encoder, trunk, actor, and critic heads.
+
+        Args:
+            grid_h (int): grid height, used to derive the CNN output size.
+            grid_w (int): grid width, used to derive the CNN output size.
+            in_channels (int): number of input channels.
+            scalar_dim (int): scalar feature vector length.
+            hidden_dim (int): trunk layer width.
+        """
         super().__init__()
         self.cnn = nn.Sequential(
             layer_init(nn.Conv2d(in_channels, 64, 3, padding=1)), nn.ReLU(),
@@ -85,13 +138,41 @@ class ActorCritic(nn.Module):
         self.critic = layer_init(nn.Linear(hidden_dim, 1), std=1.0)
 
     def forward(self, grid, scalars):
-        """Runs a forward pass and returns action logits and value estimate."""
+        """
+        Runs a forward pass and returns action logits and value estimate.
+
+        Args:
+            grid (Tensor): spatial observation, shape (B, C, H, W).
+            scalars (Tensor): scalar features, shape (B, scalar_dim).
+
+        Returns:
+            tuple: (logits, value)
+                logits (Tensor): raw action scores, shape (B, 4).
+                value (Tensor): scalar value estimate, shape (B,).
+
+        Example:
+            logits, value = net(grid, scalars)
+        """
         x = torch.cat([self.cnn(grid), self.scalar_net(scalars)], dim=-1)
         h = self.trunk(x)
         return self.actor(h), self.critic(h).squeeze(-1)
 
     def get_action_and_value(self, grid, scalars, action=None):
-        """Samples or evaluates an action and returns action, log prob, entropy, and value."""
+        """
+        Samples or evaluates an action from the current policy.
+
+        Args:
+            grid (Tensor): spatial observation, shape (B, C, H, W).
+            scalars (Tensor): scalar features, shape (B, scalar_dim).
+            action (Tensor or None): if given, evaluates log prob for these actions.
+                If None, samples a new action from the distribution.
+
+        Returns:
+            tuple: (action, log_prob, entropy, value) all shape (B,).
+
+        Example:
+            a, lp, ent, v = net.get_action_and_value(grid, scalars)
+        """
         logits, value = self.forward(grid, scalars)
         dist = Categorical(logits=logits)
         if action is None:
@@ -145,17 +226,51 @@ class PPOConfig:
 
     @classmethod
     def from_dict(cls, data: dict):
-        """Builds a PPOConfig from a dict, ignoring keys that do not belong to this class."""
+        """
+        Builds a PPOConfig from a plain dict, ignoring unrecognized keys.
+
+        Args:
+            data (dict): a flat dict or one with a "hyperparameters" sub-dict.
+
+        Returns:
+            PPOConfig: a new config instance populated from data.
+
+        Example:
+            cfg = PPOConfig.from_dict({"lr": 5e-5, "gamma": 0.99})
+        """
         valid_keys = {f.name for f in fields(cls)}
         config_data = data.get("hyperparameters", data)
         return cls(**{k: v for k, v in config_data.items() if k in valid_keys})
 
 
 class StatefulSnakeTrainer:
-    """Trainer implementing rollout collection and PPO optimization."""
+    """
+    Trainer implementing rollout collection and PPO optimization for POMDP Snake.
+
+    Applies fog of war and blinded scalars before passing observations to the
+    network. Otherwise follows the same self-play and opponent pool scheme as
+    the fully observable trainer.
+
+    Args:
+        config (PPOConfig): training configuration including grid size, learning
+            rate, rollout length, and opponent pool settings.
+        device (torch.device): device to place the network and buffers on.
+
+    Example:
+        cfg = PPOConfig()
+        trainer = StatefulSnakeTrainer(cfg, torch.device("cuda"))
+        trainer.enable_tracking()
+        trainer.train_chunk(1_000_000)
+    """
 
     def __init__(self, config: PPOConfig, device: torch.device):
-        """Sets up the network, optimizer, environment, and rollout buffers."""
+        """
+        Sets up the network, optimizer, environment, and rollout buffers.
+
+        Args:
+            config (PPOConfig): all hyperparameters and environment settings.
+            device (torch.device): compute device for tensors and the network.
+        """
         self.config, self.device = config, device
         H, W, N, T, D = config.grid_height, config.grid_width, config.num_envs, config.rollout_steps, config.scalar_dim
 
@@ -206,7 +321,16 @@ class StatefulSnakeTrainer:
         self.total_steps, self.update_count, self._ent_coef = 0, 0, config.entropy_coef
 
     def enable_tracking(self, progress_cb=None):
-        """Enables metric collection and optionally registers a progress callback."""
+        """
+        Enables per-update metric collection and optionally registers a callback.
+
+        Args:
+            progress_cb (callable or None): called after each PPO update with
+                the trainer instance as the sole argument. Default None.
+
+        Example:
+            trainer.enable_tracking(progress_cb=lambda t: print(t._metrics["reward"][-1]))
+        """
         self._metrics = {
             "steps": [],
             "reward": [],
@@ -220,7 +344,20 @@ class StatefulSnakeTrainer:
         ), self.total_steps, progress_cb
 
     def _shm_to_gpu(self):
-        """Copies observations to GPU and applies blinded scalars and fog of war masking."""
+        """
+        Copies the latest shared-memory observations to GPU with POMDP masking applied.
+
+        Direction, speed, and credit scalars are zeroed. A 7x7 fog of war centered
+        on each snake head is applied to the grid.
+
+        Returns:
+            tuple: (grids, scalars)
+                grids (Tensor): masked spatial observations, shape (N, 2, C, H, W).
+                scalars (Tensor): blinded scalar features with wall distances, shape (N, 2, D).
+
+        Example:
+            gs, ss = trainer._shm_to_gpu()
+        """
         if self._is_torch_env:
             grids, meta = self.vec_env.torch_grids, self.vec_env.torch_meta
         else:
@@ -262,7 +399,19 @@ class StatefulSnakeTrainer:
         return grids.contiguous(), scalars.contiguous()
 
     def train_chunk(self, target_steps: int) -> float:
-        """Collects rollouts and runs PPO updates until total_steps reaches target_steps."""
+        """
+        Collects rollouts and runs PPO updates until total_steps reaches target_steps.
+
+        Args:
+            target_steps (int): keep training until this many learner steps have
+                been collected since the trainer was created or last loaded.
+
+        Returns:
+            float: mean episode reward over the last 100 completed episodes.
+
+        Example:
+            mean_rew = trainer.train_chunk(5_000_000)
+        """
         N, T = self.config.num_envs, self.config.rollout_steps
         while self.total_steps < target_steps:
             self.network.eval()
@@ -354,7 +503,20 @@ class StatefulSnakeTrainer:
         return float(np.mean(self.ep_rews)) if self.ep_rews else 0.0
 
     def _ppo_update(self, gs, ss, acts, lp_o, adv, ret):
-        """Runs the PPO minibatch update loop and returns mean policy, value, and entropy losses."""
+        """
+        Runs the PPO minibatch update loop over the collected rollout.
+
+        Args:
+            gs (Tensor): grid observations, shape (M, C, H, W).
+            ss (Tensor): scalar features, shape (M, D).
+            acts (Tensor): actions taken, shape (M,).
+            lp_o (Tensor): old log probabilities, shape (M,).
+            adv (Tensor): normalized advantages, shape (M,).
+            ret (Tensor): discounted returns, shape (M,).
+
+        Returns:
+            tuple: (pi_loss, v_loss, entropy) mean values over all minibatches.
+        """
         adv = (adv - adv.mean()) / (adv.std() + 1e-8)
         self.network.train()
         pi_s, v_s, ent_s, n_mb = 0, 0, 0, 0
@@ -396,7 +558,15 @@ class StatefulSnakeTrainer:
         return pi_s / n_mb, v_s / n_mb, ent_s / n_mb
 
     def save_state(self, path):
-        """Saves the network weights, optimizer state, config, and training progress to a file."""
+        """
+        Saves the network weights, optimizer state, config, and training progress.
+
+        Args:
+            path (str): file path ending in .pt to write the checkpoint to.
+
+        Example:
+            trainer.save_state("outputs/models/final_model_base_pomp.pt")
+        """
         torch.save({"network": self._raw_network.state_dict(),
                     "optimizer": self.optimizer.state_dict(),
                     "config_dict": asdict(self.config),
@@ -405,7 +575,15 @@ class StatefulSnakeTrainer:
                    path)
 
     def load_state(self, path):
-        """Loads a previously saved checkpoint and restores training state."""
+        """
+        Loads a checkpoint and restores network weights, optimizer, and step count.
+
+        Args:
+            path (str): path to a .pt file previously saved by save_state.
+
+        Example:
+            trainer.load_state("outputs/models/final_model_base_pomp.pt")
+        """
         ckpt = torch.load(path, map_location=self.device, weights_only=False)
         self._raw_network.load_state_dict(ckpt["network"])
         self.optimizer.load_state_dict(ckpt["optimizer"])

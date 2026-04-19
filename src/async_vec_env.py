@@ -47,22 +47,24 @@ def get_cached_vec_env(
     **kwargs,
 ) -> "AsyncVecEnv":
     """
-    Returns a ready-to-use AsyncVecEnv, reusing cached workers when possible.
+    Returns a ready-to-use vec env, reusing cached workers when possible.
 
     On a cache miss it spawns workers (one-time cost on the first trial).
     On a cache hit it sends update_rewards and reset_all which takes about 2 ms.
 
-    All arguments come from asdict(PPOConfig). No explicit positional params
-    are needed, which avoids the duplicate keyword argument error when callers
-    spread the full config dict.
+    Args:
+        reward_kwargs (dict): keys from _REWARD_KEYS, updated on workers before reset.
+        **kwargs: full PPOConfig dict. num_envs, num_workers, grid_height, grid_width,
+            env_backend, and seed are extracted here; the rest go to the env class.
 
-    Parameters
-    ----------
-    reward_kwargs : dict
-        Keys from _REWARD_KEYS, updated on workers before reset.
-    **kwargs
-        Full PPOConfig dict. num_envs, num_workers, grid_height, grid_width,
-        and seed are extracted here; the rest are forwarded to AsyncVecEnv.
+    Returns:
+        AsyncVecEnv or TorchSnakeVecEnv: a reset and ready environment instance.
+
+    Example:
+        from async_vec_env import get_cached_vec_env
+        vec_env = get_cached_vec_env(reward_kwargs={}, num_envs=64, num_workers=4)
+        vec_env.send_actions(actions_np)
+        vec_env.recv_results()
     """
     num_envs = kwargs.get("num_envs", 256)
     num_workers = kwargs.get("num_workers", None)
@@ -115,7 +117,16 @@ def get_cached_vec_env(
 
 
 def close_all_cached() -> None:
-    """Gracefully shuts down all cached workers. Call this at program exit."""
+    """
+    Gracefully shuts down all cached vector environments.
+
+    Call this once at program exit to release worker processes and shared memory.
+    Safe to call even if no environments have been created. No return value.
+
+    Example:
+        from async_vec_env import close_all_cached
+        close_all_cached()
+    """
     for vec_env in _VECENV_CACHE.values():
         try:
             vec_env.close()
@@ -126,10 +137,22 @@ def close_all_cached() -> None:
 
 class TorchSnakeVecEnv:
     """
-    Batched torch-backed Snake environment.
+    Batched GPU-backed Snake environment with no worker processes.
 
-    Keeps env state, observations, rewards, and dones on the target device so
-    PPO rollouts do not round-trip through CPU workers or shared memory.
+    Keeps all game state, observations, rewards, and dones on the target device
+    so PPO rollouts do not round-trip through CPU workers or shared memory.
+
+    Args:
+        num_envs (int): number of parallel game instances to run.
+        device (str or torch.device): compute device for all tensors.
+        **kwargs: grid_width, grid_height, num_food, max_steps, seed, and
+            reward shaping values forwarded from PPOConfig.
+
+    Example:
+        from async_vec_env import TorchSnakeVecEnv
+        import torch
+        vec_env = TorchSnakeVecEnv(num_envs=64, device=torch.device("cuda"))
+        vec_env.reset()
     """
 
     _ENV_KEYS = frozenset([
@@ -146,7 +169,15 @@ class TorchSnakeVecEnv:
         device,
         **kwargs,
     ):
-        """Allocates all batched state tensors and sets up the initial snake positions."""
+        """
+        Allocates all batched state tensors and sets up initial snake positions.
+
+        Args:
+            num_envs (int): number of parallel game instances to run.
+            device (str or torch.device): compute device for all tensors.
+            **kwargs: grid_width, grid_height, num_food, max_steps, seed, and
+                reward shaping values forwarded from PPOConfig.
+        """
         self.num_envs = int(num_envs)
         self.device = torch.device(device)
         self.W = int(kwargs.get("grid_width", 24))
@@ -287,7 +318,17 @@ class TorchSnakeVecEnv:
         self._compile_error = None
 
     def enable_compile(self) -> None:
-        """Attempts to compile the inner step function with torch.compile for faster GPU throughput."""
+        """
+        Attempts to compile the inner step function with torch.compile.
+
+        Tries two compile configurations and falls back to eager mode if both fail.
+        No return value. Only has an effect when the device is CUDA and
+        torch_env_compile was set to True at construction.
+
+        Example:
+            vec_env = TorchSnakeVecEnv(num_envs=64, device="cuda")
+            vec_env.enable_compile()
+        """
         if not self._compile_requested or self._use_compiled_step:
             return
 
@@ -324,7 +365,16 @@ class TorchSnakeVecEnv:
                 flush=True)
 
     def reset(self) -> None:
-        """Resets all environments and rebuilds the initial observations."""
+        """
+        Resets all environments and rebuilds the initial observations.
+
+        Writes updated state into torch_grids, torch_meta, torch_rews,
+        and torch_dones. No return value.
+
+        Example:
+            vec_env = TorchSnakeVecEnv(num_envs=4, device="cpu")
+            vec_env.reset()
+        """
         mask = torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
         self._reset_mask(mask)
         self.torch_rews.zero_()
@@ -332,7 +382,15 @@ class TorchSnakeVecEnv:
         self._rebuild_observations_impl()
 
     def update_rewards(self, reward_kwargs: dict) -> None:
-        """Overwrites reward shaping attributes in place without restarting the environment."""
+        """
+        Overwrites reward shaping attributes in place without restarting the environment.
+
+        Args:
+            reward_kwargs (dict): keys from _REWARD_KEYS with updated values.
+
+        Example:
+            vec_env.update_rewards({"food_reward": 2.0, "death_penalty": -3.0})
+        """
         filtered = {
             k: v for k,
             v in reward_kwargs.items() if k in _REWARD_KEYS}
@@ -340,7 +398,15 @@ class TorchSnakeVecEnv:
             setattr(self, attr, val)
 
     def reset_single(self, global_i: int) -> None:
-        """Resets one environment by index and rebuilds its observations."""
+        """
+        Resets one environment by index and rebuilds its observations.
+
+        Args:
+            global_i (int): zero-based index of the environment to reset.
+
+        Example:
+            vec_env.reset_single(3)  # resets only env at index 3
+        """
         mask = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         mask[int(global_i)] = True
         self._reset_mask(mask)
@@ -349,15 +415,36 @@ class TorchSnakeVecEnv:
         self._rebuild_observations_impl()
 
     def close(self) -> None:
-        """No-op for the torch backend since there are no worker processes to shut down."""
+        """
+        No-op for the torch backend since there are no worker processes to shut down.
+
+        Exists so TorchSnakeVecEnv can be used interchangeably with AsyncVecEnv.
+        """
         return
 
     def recv_results(self) -> None:
-        """No-op for the torch backend since the step is synchronous."""
+        """
+        No-op for the torch backend since the step is synchronous.
+
+        Exists so TorchSnakeVecEnv can be used interchangeably with AsyncVecEnv.
+        """
         return
 
     def send_actions(self, actions) -> None:
-        """Runs one environment step for all agents using the given action tensor."""
+        """
+        Runs one environment step for all agents using the given action tensor.
+
+        Results are written into torch_grids, torch_meta, torch_rews, and torch_dones.
+        Completed episodes are auto-reset before observations are written back.
+
+        Args:
+            actions (Tensor or array-like): action indices, shape (num_envs, 2).
+
+        Example:
+            import torch
+            actions = torch.randint(0, 4, (64, 2))
+            vec_env.send_actions(actions)
+        """
         actions_t = torch.as_tensor(
             actions, device=self.device, dtype=torch.long)
         actions_t = actions_t.view(self.num_envs, 2)
@@ -379,7 +466,12 @@ class TorchSnakeVecEnv:
             self._send_actions_impl(actions_t)
 
     def _materialize_persistent_state(self) -> None:
-        """Clones all state tensors to break compiler-owned graph output references before falling back to eager mode."""
+        """
+        Clones all state tensors before falling back from compiled to eager mode.
+
+        Breaks compiler-owned graph output references so in-place ops on state
+        tensors are safe again. Called automatically on compile fallback.
+        """
         self.body_x = self.body_x.clone()
         self.body_y = self.body_y.clone()
         self.lengths = self.lengths.clone()
@@ -400,7 +492,12 @@ class TorchSnakeVecEnv:
         self.torch_dones = self.torch_dones.clone()
 
     def _send_actions_impl(self, actions_t: torch.Tensor) -> None:
-        """Core step implementation: plans moves, runs substeps, handles resets and observations."""
+        """
+        Core step: plans moves, runs sub-steps, auto-resets done envs, rebuilds observations.
+
+        Args:
+            actions_t (Tensor): action indices of shape (num_envs, 2), long dtype.
+        """
         self.torch_rews.zero_()
         self.torch_dones.zero_()
 
@@ -424,7 +521,16 @@ class TorchSnakeVecEnv:
         self._rebuild_observations_impl()
 
     def _plan_tick_moves(self) -> torch.Tensor:
-        """Returns how many grid cells each agent should move this tick based on speed credits."""
+        """
+        Returns how many grid cells each agent should move this tick.
+
+        Accumulates speed credits and takes the integer floor as the move count,
+        carrying the fractional remainder forward. Returns 1 for all alive agents
+        when speed_mode is disabled.
+
+        Returns:
+            Tensor: integer move counts of shape (num_envs, 2).
+        """
         if not self.speed_mode:
             return self.alive.to(torch.int32)
 
@@ -452,7 +558,17 @@ class TorchSnakeVecEnv:
             self,
             actions: torch.Tensor,
             moving: torch.Tensor) -> None:
-        """Runs one physical movement sub-step: resolves directions, collisions, food, and rewards."""
+        """
+        Runs one physical movement sub-step for all active agents.
+
+        Resolves direction changes, detects wall and body collisions,
+        applies food collection, distance shaping, and win/loss rewards.
+        Updates torch_rews and all game state tensors in place.
+
+        Args:
+            actions (Tensor): action indices, shape (num_envs, 2).
+            moving (Tensor): bool mask of agents that move this sub-step, shape (num_envs, 2).
+        """
         env_active = moving.any(dim=1)
         self.step_count += env_active.long()
 
@@ -585,14 +701,24 @@ class TorchSnakeVecEnv:
         self.torch_rews += sub_rews
 
     def _speed_multiplier(self) -> torch.Tensor:
-        """Computes the speed multiplier for each agent based on how much food they have eaten."""
+        """
+        Computes the speed multiplier for each agent based on food eaten.
+
+        Returns:
+            Tensor: multipliers of shape (num_envs, 2), values >= 1.0.
+        """
         speed = BASE_SPEED * \
             torch.pow(self._speed_growth, self.food_eaten.float())
         speed = torch.clamp(speed, max=MAX_SPEED)
         return speed / BASE_SPEED
 
     def _score_winner(self) -> torch.Tensor:
-        """Returns the agent index with the higher score for each env, or negative one on a tie."""
+        """
+        Returns the agent index with the higher score for each env.
+
+        Returns:
+            Tensor: long tensor of shape (num_envs,) with values 0, 1, or -1 on a tie.
+        """
         winners = torch.full((self.num_envs,), -
                              1, dtype=torch.long, device=self.device)
         better0 = self.scores[:, 0] > self.scores[:, 1]
@@ -602,7 +728,12 @@ class TorchSnakeVecEnv:
         return winners
 
     def _reset_mask(self, env_mask: torch.Tensor) -> None:
-        """Resets all state tensors for environments marked True in env_mask."""
+        """
+        Resets all state tensors for environments where env_mask is True.
+
+        Args:
+            env_mask (Tensor): bool tensor of shape (num_envs,). True means reset that env.
+        """
         if not env_mask.any():
             return
 
@@ -646,7 +777,12 @@ class TorchSnakeVecEnv:
         self._refill_food(env_mask)
 
     def _refill_food(self, env_mask: torch.Tensor) -> None:
-        """Spawns food in environments that are below the target food count."""
+        """
+        Spawns food in environments that are below the target food count.
+
+        Args:
+            env_mask (Tensor): bool tensor of shape (num_envs,). Only masked envs are refilled.
+        """
         if not env_mask.any():
             return
 
@@ -659,7 +795,15 @@ class TorchSnakeVecEnv:
             self._spawn_one_food(need)
 
     def _spawn_one_food(self, env_mask: torch.Tensor) -> None:
-        """Places one food item in a random free cell for each environment in env_mask."""
+        """
+        Places one food item in a random free cell for each environment in env_mask.
+
+        Uses multinomial sampling weighted by free cells. Writes into food_x,
+        food_y, and food_active in place. No return value.
+
+        Args:
+            env_mask (Tensor): bool tensor of shape (num_envs,) indicating which envs need food.
+        """
         if not env_mask.any():
             return
 
@@ -701,7 +845,12 @@ class TorchSnakeVecEnv:
         self.food_active |= slot_mask
 
     def _rebuild_observations_impl(self) -> None:
-        """Rebuilds the torch_grids and torch_meta tensors from the current game state."""
+        """
+        Rebuilds torch_grids and torch_meta from the current game state.
+
+        Writes all 8 grid channels and the 6 scalar meta fields for both agents
+        from each agent's point of view. No return value.
+        """
         self.torch_grids.zero_()
 
         food_idx = self.food_y * self.W + self.food_x
@@ -767,14 +916,21 @@ def _worker_fn(
     W: int,
 ) -> None:
     """
-    Worker subprocess entry point.
+    Entry point for each AsyncVecEnv worker subprocess.
 
-    Protocol (pipe messages):
-        recv ("reset_all",      None)               write obs, send back a zero byte
-        recv ("step",           np.int32 (K,2))     step K envs, write, send back a zero byte
-        recv ("reset_single",   int local_idx)      reset one env, send back a zero byte
-        recv ("update_rewards", dict)               overwrite env attrs, send back a zero byte
-        recv ("close",          None)               cleanup, send back a zero byte, exit
+    Receives commands from the parent pipe and writes results to shared memory.
+    Supported commands are reset_all, step, reset_single, update_rewards, and close.
+    Each command sends back a zero byte when done so the parent can synchronize.
+
+    Args:
+        pipe (Connection): one end of a multiprocessing Pipe for command exchange.
+        env_kwargs_list (list of dict): one kwargs dict per environment this worker owns.
+        shm_names (dict of str to str): shared memory block names keyed by "grids",
+            "meta", "rews", and "dones".
+        total_envs (int): total number of environments across all workers.
+        env_start (int): global index of this worker's first environment.
+        H (int): grid height in cells.
+        W (int): grid width in cells.
     """
     shms = {
         k: shared_memory.SharedMemory(
@@ -873,17 +1029,29 @@ def _worker_fn(
 
 class AsyncVecEnv:
     """
-    Shared-memory async vectorised environment.
+    Shared-memory async vectorised environment backed by subprocess workers.
 
-    Normally obtained via get_cached_vec_env() rather than instantiated
-    directly. The cache avoids repeated worker spawning across DEHB trials.
+    Normally obtained via get_cached_vec_env() rather than instantiated directly.
+    The cache avoids repeated worker spawning across DEHB trials.
 
-    Public shared-memory arrays (safe to read after reset() or recv_results(),
-    until the next send_actions()):
-        np_grids  : (num_envs, 2, C, H, W)  float32  observation grids
-        np_meta   : (num_envs, 2, META_DIM)  float32  [dir, speed, speed_credit, hx, hy, alive]
-        np_rews   : (num_envs, 2)            float32  per-agent rewards
-        np_dones  : (num_envs, 3)            uint8    [done_0, done_1, done_all]
+    After reset() or recv_results() and before the next send_actions(), these
+    shared numpy arrays are safe to read:
+        np_grids  shape (num_envs, 2, C, H, W)   float32  observation grids
+        np_meta   shape (num_envs, 2, META_DIM)   float32  dir, speed, speed_credit, hx, hy, alive
+        np_rews   shape (num_envs, 2)              float32  per-agent rewards
+        np_dones  shape (num_envs, 3)              uint8    done_0, done_1, done_all
+
+    Args:
+        num_envs (int): total number of game instances distributed across workers.
+        num_workers (int or None): number of worker processes. Defaults to half the CPU count.
+        **kwargs: grid and reward settings forwarded to each MultiAgentSnakeEnv instance.
+
+    Example:
+        from async_vec_env import AsyncVecEnv
+        vec_env = AsyncVecEnv(num_envs=16, grid_width=24, grid_height=18)
+        vec_env.reset()
+        vec_env.send_actions(actions_np)
+        vec_env.recv_results()
     """
 
     _ENV_KEYS = frozenset([
@@ -898,7 +1066,15 @@ class AsyncVecEnv:
         num_workers: Optional[int] = None,
         **kwargs,
     ):
-        """Allocates shared memory and spawns worker processes."""
+        """
+        Allocates shared memory blocks and spawns worker processes.
+
+        Args:
+            num_envs (int): total number of game instances distributed across workers.
+            num_workers (int or None): number of worker processes. Defaults to half the CPU count.
+            **kwargs: grid_width, grid_height, num_food, max_steps, seed, and reward shaping
+                values forwarded to each MultiAgentSnakeEnv instance.
+        """
         self.num_envs = num_envs
         H = kwargs.get("grid_height", 18)
         W = kwargs.get("grid_width", 24)
@@ -969,14 +1145,30 @@ class AsyncVecEnv:
         )
 
     def reset(self) -> None:
-        """Resets all environments. Shared memory is populated before this returns."""
+        """
+        Resets all environments and waits for shared memory to be populated.
+
+        Sends reset_all to every worker and blocks until all reply.
+        After this returns, np_grids and np_meta contain fresh observations.
+        """
         for pipe in self._pipes:
             pipe.send(("reset_all", None))
         for pipe in self._pipes:
             pipe.recv()
 
     def update_rewards(self, reward_kwargs: dict) -> None:
-        """Overwrites reward shaping attributes on all worker environments before a new trial begins."""
+        """
+        Overwrites reward shaping attributes on all worker environments.
+
+        Sends the new values to every worker and blocks until all reply.
+        Call this before reset() when starting a new HPO trial.
+
+        Args:
+            reward_kwargs (dict): keys from _REWARD_KEYS with updated values.
+
+        Example:
+            vec_env.update_rewards({"food_reward": 3.0, "death_penalty": -2.0})
+        """
         filtered = {
             k: v for k,
             v in reward_kwargs.items() if k in _REWARD_KEYS}
@@ -988,13 +1180,29 @@ class AsyncVecEnv:
             pipe.recv()
 
     def reset_single(self, global_i: int) -> None:
-        """Resets one environment by global index. Workers auto-reset on episode end during rollouts."""
+        """
+        Resets one environment by global index.
+
+        Workers auto-reset on episode end during rollouts, so this is mostly
+        useful for manual control or testing.
+
+        Args:
+            global_i (int): zero-based global index of the environment to reset.
+
+        Example:
+            vec_env.reset_single(5)  # resets only env at global index 5
+        """
         w, li = self._env_location(global_i)
         self._pipes[w].send(("reset_single", li))
         self._pipes[w].recv()
 
     def close(self) -> None:
-        """Shuts down all worker processes and releases shared memory."""
+        """
+        Shuts down all worker processes and releases shared memory.
+
+        Sends close to every worker, joins the processes with a 5-second timeout,
+        and unlinks the shared memory blocks. Safe to call more than once.
+        """
         for pipe in self._pipes:
             try:
                 pipe.send(("close", None))
@@ -1013,19 +1221,47 @@ class AsyncVecEnv:
                 pass
 
     def send_actions(self, actions_np: np.ndarray) -> None:
-        """Dispatches step commands to all workers simultaneously without blocking."""
+        """
+        Dispatches step commands to all workers simultaneously without blocking.
+
+        Pair with recv_results() to complete the step. Shared memory is ready
+        only after recv_results() returns.
+
+        Args:
+            actions_np (np.ndarray): action indices, shape (num_envs, 2), int32.
+
+        Example:
+            vec_env.send_actions(actions_np)
+            vec_env.recv_results()
+            obs = vec_env.np_grids.copy()
+        """
         offset = 0
         for pipe, size in zip(self._pipes, self._worker_sizes):
             pipe.send(("step", actions_np[offset: offset + size]))
             offset += size
 
     def recv_results(self) -> None:
-        """Blocks until all workers have finished writing results to shared memory."""
+        """
+        Blocks until all workers have finished writing results to shared memory.
+
+        After this returns, np_grids, np_meta, np_rews, and np_dones are safe to read.
+        """
         for pipe in self._pipes:
             pipe.recv()
 
     def _env_location(self, global_i: int):
-        """Returns the worker index and local index for a given global environment index."""
+        """
+        Returns the worker index and local index for a given global environment index.
+
+        Args:
+            global_i (int): zero-based global environment index.
+
+        Returns:
+            tuple of int: (worker_index, local_index_within_that_worker).
+
+        Raises:
+            IndexError: if global_i is out of range.
+        """
         offset = 0
         for w, size in enumerate(self._worker_sizes):
             if global_i < offset + size:

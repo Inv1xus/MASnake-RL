@@ -17,7 +17,16 @@ SPEED_GROWTH = 1.05
 
 
 class Action(IntEnum):
-    """Discrete movement actions supported by both agents."""
+    """
+    Discrete movement actions supported by both agents.
+
+    Values map as UP=0, DOWN=1, LEFT=2, RIGHT=3.
+
+    Example:
+        from snake_env import Action
+        act = Action.UP
+        print(int(act))  # 0
+    """
     UP = 0
     DOWN = 1
     LEFT = 2
@@ -41,7 +50,24 @@ _OPPOSITE = {
 
 @dataclass
 class SnakeAgent:
-    """Mutable per-agent state container used inside each environment step."""
+    """
+    Holds all mutable state for a single snake during an episode.
+
+    Args:
+        agent_id (int): either 0 or 1.
+        body (list of tuple): (x, y) cells ordered from head to tail.
+        direction (Action): current facing direction.
+        alive (bool): False once the snake has collided.
+        score (int): total food items eaten.
+        food_eaten (int): same as score, drives speed calculations.
+        speed_credits (float): fractional carry from the tick accumulator.
+
+    Example:
+        from snake_env import SnakeAgent, Action
+        agent = SnakeAgent(agent_id=0, body=[(5, 9), (6, 9)], direction=Action.LEFT)
+        print(agent.head)           # (5, 9)
+        print(agent.current_speed())  # 10.0
+    """
     agent_id: int
     body: List[Tuple[int, int]]
     direction: Action
@@ -53,19 +79,59 @@ class SnakeAgent:
 
     @property
     def head(self) -> Tuple[int, int]:
-        """Returns the snake's current head position."""
+        """
+        Returns the snake's current head position.
+
+        Returns:
+            tuple of int: (x, y) coordinates of the head cell.
+
+        Example:
+            agent = SnakeAgent(agent_id=0, body=[(3, 4), (4, 4)], direction=Action.LEFT)
+            print(agent.head)  # (3, 4)
+        """
         return self.body[0]
 
     def current_speed(self) -> float:
-        """Returns the current speed value."""
+        """
+        Returns the agent's current speed in grid cells per second.
+
+        Returns:
+            float: BASE_SPEED multiplied by the cached speed multiplier.
+
+        Example:
+            agent = SnakeAgent(agent_id=0, body=[(0, 0)], direction=Action.RIGHT)
+            print(agent.current_speed())  # 10.0 at the start
+        """
         return BASE_SPEED * self._speed_mult
 
     def speed_multiplier(self) -> float:
-        """Returns the speed multiplier relative to base speed."""
+        """
+        Returns the speed multiplier relative to base speed.
+
+        Returns:
+            float: value >= 1.0, grows as the snake eats more food.
+
+        Example:
+            agent = SnakeAgent(agent_id=0, body=[(0, 0)], direction=Action.RIGHT)
+            agent.food_eaten = 5
+            agent.update_speed()
+            print(agent.speed_multiplier())  # > 1.0
+        """
         return self._speed_mult
 
     def update_speed(self):
-        """Updates the cached speed multiplier after the snake eats food."""
+        """
+        Recomputes and caches the speed multiplier after the snake eats food.
+
+        Call this once per food collection event. No return value. The result
+        is stored in _speed_mult and read by current_speed and speed_multiplier.
+
+        Example:
+            agent = SnakeAgent(agent_id=0, body=[(0, 0)], direction=Action.RIGHT)
+            agent.food_eaten = 3
+            agent.update_speed()
+            print(agent.speed_multiplier())  # SPEED_GROWTH ** 3
+        """
         # Speed is an exponential function of food eaten, capped at MAX_SPEED.
         # We cache the multiplier rather than recomputing it every frame.
         new_speed = min(MAX_SPEED, BASE_SPEED *
@@ -74,7 +140,28 @@ class SnakeAgent:
 
 
 class MultiAgentSnakeEnv:
-    """Two-player Snake environment with reward shaping and optional speed mode."""
+    """
+    Two-player Snake environment with reward shaping and optional speed mode.
+
+    Args:
+        grid_width (int): number of columns in the grid. Default 24.
+        grid_height (int): number of rows in the grid. Default 18.
+        num_food (int): food items active at once. Default 2.
+        max_steps (int): step limit per episode. Default 1000.
+        seed (int or None): random seed for food spawning.
+        survival_reward (float): reward each tick an agent stays alive.
+        food_reward (float): reward for eating food.
+        death_penalty (float): penalty applied on collision.
+        win_reward (float): bonus given to the last survivor.
+        distance_shaping (float): shaping weight for moving toward food.
+        speed_mode (bool): if True, eating food increases movement speed.
+
+    Example:
+        from snake_env import MultiAgentSnakeEnv
+        env = MultiAgentSnakeEnv(grid_width=24, grid_height=18, seed=0)
+        obs = env.reset()
+        obs, rews, dones, info = env.step({0: 0, 1: 1})
+    """
 
     N_CHANNELS = 8
 
@@ -92,7 +179,22 @@ class MultiAgentSnakeEnv:
         distance_shaping: float = 0.15,
         speed_mode: bool = True,
     ):
-        """Sets up the grid size, reward values, and internal state containers."""
+        """
+        Sets up the grid size, reward values, and internal state containers.
+
+        Args:
+            grid_width (int): columns in the play area.
+            grid_height (int): rows in the play area.
+            num_food (int): how many food items stay on the board at once.
+            max_steps (int): episode length cap.
+            seed (int or None): seed for the food-spawning RNG.
+            survival_reward (float): small reward every tick an agent lives.
+            food_reward (float): reward granted on food collection.
+            death_penalty (float): negative reward on any death event.
+            win_reward (float): bonus added when only one snake is left alive.
+            distance_shaping (float): coefficient for potential-based food shaping.
+            speed_mode (bool): enable speed scaling after eating food.
+        """
         self.W = grid_width
         self.H = grid_height
         self.num_food = num_food
@@ -116,7 +218,19 @@ class MultiAgentSnakeEnv:
         self.winner: Optional[int] = None
 
     def reset(self) -> Dict[int, dict]:
-        """Resets board state and returns starting observations for both agents."""
+        """
+        Resets the board and returns starting observations for both agents.
+
+        Returns:
+            dict of int to dict: maps agent IDs (0 and 1) to their first observation.
+            Each observation contains: grid, direction, speed, speed_credit,
+            score, alive, head, food, step_count.
+
+        Example:
+            env = MultiAgentSnakeEnv()
+            obs = env.reset()
+            print(obs[0]["alive"])  # True
+        """
         cy = self.H // 2
         q1 = max(2, self.W // 4)
         q3 = min(self.W - 3, 3 * self.W // 4)
@@ -150,7 +264,24 @@ class MultiAgentSnakeEnv:
     def step(
         self, actions: Dict[int, int]
     ) -> Tuple[Dict[int, dict], Dict[int, float], Dict[int, bool], Dict[int, dict]]:
-        """Advances one tick using the given actions and returns gym-style outputs."""
+        """
+        Advances the environment one tick and returns gym-style outputs.
+
+        Args:
+            actions (dict of int to int): maps agent ID to action index (0 to 3).
+
+        Returns:
+            tuple: (obs, rewards, dones, info)
+                obs (dict): updated observations keyed by agent ID.
+                rewards (dict of int to float): reward earned this tick per agent.
+                dones (dict): done flags per agent plus "__all__" for episode end.
+                info (dict): extra info such as cause of death.
+
+        Example:
+            env = MultiAgentSnakeEnv()
+            env.reset()
+            obs, rews, dones, info = env.step({0: 2, 1: 3})
+        """
         if self.done:
             raise RuntimeError("Episode done, call reset() first.")
 
@@ -217,7 +348,13 @@ class MultiAgentSnakeEnv:
         return obs, accumulated_rewards, last_dones, last_info
 
     def _plan_tick_moves(self) -> Dict[int, int]:
-        """Computes how many grid cells each alive agent moves this tick."""
+        """
+        Computes how many grid cells each alive agent should move this tick.
+
+        Returns:
+            dict of int to int: maps agent ID to cell count (>= 1).
+            Only agents that will move this tick are included.
+        """
         moves = {}
         for aid, agent in self.agents.items():
             if not agent.alive:
@@ -244,7 +381,18 @@ class MultiAgentSnakeEnv:
         moving_agents: Optional[set] = None,
         build_obs: bool = True,
     ) -> Tuple[Dict[int, dict], Dict[int, float], Dict[int, bool], Dict[int, dict]]:
-        """Executes one sub-tick: resolves direction, detects deaths, applies food and shaping."""
+        """
+        Runs one physical movement sub-tick inside a tick.
+
+        Args:
+            actions (dict of int to int): action index per agent.
+            moving_agents (set of int or None): which agents move this sub-tick.
+                If None, all alive agents move.
+            build_obs (bool): if True, include rebuilt observations in the return value.
+
+        Returns:
+            tuple: (obs, rewards, dones, info) in gym format.
+        """
         rewards: Dict[int, float] = {
             i: self.survival_reward for i in self.agents}
         info: Dict[int, dict] = {i: {} for i in self.agents}
@@ -374,7 +522,13 @@ class MultiAgentSnakeEnv:
         return obs, rewards, dones, info
 
     def _observations(self) -> Dict[int, dict]:
-        """Builds and returns the observation dict for all agents."""
+        """
+        Builds and returns the observation dict for all agents.
+
+        Returns:
+            dict of int to dict: each inner dict has keys grid, direction, speed,
+            speed_credit, score, alive, head, food, step_count.
+        """
         obs = {}
         for aid, agent in self.agents.items():
             obs[aid] = {
@@ -391,7 +545,23 @@ class MultiAgentSnakeEnv:
         return obs
 
     def _build_grid(self, viewer_id: int) -> np.ndarray:
-        """Renders the game state as a multi-channel grid from one agent's point of view."""
+        """
+        Renders the current game state as a multi-channel grid.
+
+        Args:
+            viewer_id (int): the agent whose perspective is used.
+                Self channels (0, 1, 5) map to this agent,
+                opponent channels (2, 3, 6) map to the other.
+
+        Returns:
+            np.ndarray: shape (N_CHANNELS, H, W), float32 in [0, 1].
+
+        Example:
+            env = MultiAgentSnakeEnv()
+            env.reset()
+            grid = env._build_grid(viewer_id=0)
+            print(grid.shape)  # (8, 18, 24)
+        """
         self._obs_buf[:] = 0.0
 
         for fx, fy in self.food_positions:
@@ -427,7 +597,12 @@ class MultiAgentSnakeEnv:
         return self._obs_buf.copy()
 
     def _spawn_food(self) -> Optional[Tuple[int, int]]:
-        """Picks a random free cell and returns its coordinates as a food position."""
+        """
+        Picks a random free cell for food placement.
+
+        Returns:
+            tuple of int or None: (x, y) of the chosen cell, or None if the board is full.
+        """
         occupied = set(self.food_positions)
         for a in self.agents.values():
             occupied.update(a.body)
@@ -441,7 +616,12 @@ class MultiAgentSnakeEnv:
         return (idx % self.W, idx // self.W)
 
     def _refill_food(self):
-        """Spawns food until the board has the target number of active food items."""
+        """
+        Spawns food items until the board reaches the target count.
+
+        Calls _spawn_food in a loop. Stops early if the board is full.
+        No return value; modifies food_positions in place.
+        """
         while len(self.food_positions) < self.num_food:
             food = self._spawn_food()
             if food is None:
@@ -449,14 +629,34 @@ class MultiAgentSnakeEnv:
             self.food_positions.append(food)
 
     def _score_winner(self) -> Optional[int]:
-        """Returns the agent with the highest score, or None if scores are tied."""
+        """
+        Resolves the winner by score when the episode ends at the step limit.
+
+        Returns:
+            int or None: agent ID of the highest scorer, or None if tied.
+        """
         scores = {aid: a.score for aid, a in self.agents.items()}
         best = max(scores.values())
         top = [aid for aid, s in scores.items() if s == best]
         return top[0] if len(top) == 1 else None
 
     def render(self, cell_size: int = 28, padding: int = 8):
-        """Draws the current game state to a pygame window."""
+        """
+        Draws the current game state to a pygame window.
+
+        Opens the window on the first call and updates it on subsequent calls.
+        Requires pygame to be installed.
+
+        Args:
+            cell_size (int): pixel size of each grid cell. Default 28.
+            padding (int): pixel border around the grid. Default 8.
+
+        Example:
+            env = MultiAgentSnakeEnv()
+            env.reset()
+            env.render()        # opens a window and draws the board
+            env.close_render()  # closes it when done
+        """
         try:
             import pygame
         except ImportError:
@@ -517,7 +717,11 @@ class MultiAgentSnakeEnv:
             pass
 
     def close_render(self):
-        """Shuts down the pygame window if it was opened."""
+        """
+        Shuts down the pygame window if it was opened.
+
+        Safe to call even if render was never called. No return value.
+        """
         if hasattr(self, "_pg_init"):
             import pygame
             pygame.quit()

@@ -20,15 +20,19 @@ class SnakeGymEnv(gym.Env):
     """
     Single-agent Gymnasium wrapper for MultiAgentSnakeEnv.
 
-    Parameters
-    ----------
-    opponent_fn : callable or None
-        Policy for agent 1. Pass None for uniform random.
-    history_len : int
-        How many past (obs, action, reward) tuples to keep in self._history.
-        Zero disables history with no overhead.
-    **env_kwargs
-        Forwarded to MultiAgentSnakeEnv.
+    Exposes agent 0 as the learner. Agent 1 is controlled by an opponent
+    function that can be swapped at any time without recreating the environment.
+
+    Args:
+        opponent_fn (callable or None): policy for agent 1. Pass None for random.
+        history_len (int): number of past transitions to keep; 0 disables history.
+        **env_kwargs: passed through to MultiAgentSnakeEnv.
+
+    Example:
+        from gym_wrapper import SnakeGymEnv
+        env = SnakeGymEnv(grid_width=24, grid_height=18)
+        obs, info = env.reset()
+        obs, reward, terminated, truncated, info = env.step(env.action_space.sample())
     """
 
     metadata = {"render_modes": ["human"]}
@@ -45,7 +49,15 @@ class SnakeGymEnv(gym.Env):
         history_len: int = 0,
         **env_kwargs,
     ):
-        """Sets up the wrapped environment, opponent, history buffer, and gym spaces."""
+        """
+        Sets up the wrapped environment, opponent, history buffer, and gym spaces.
+
+        Args:
+            opponent_fn (callable or None): called with the opponent observation each step
+                to produce an action. None uses random actions.
+            history_len (int): max number of transitions stored in self._history.
+            **env_kwargs: keyword arguments forwarded to MultiAgentSnakeEnv.
+        """
         super().__init__()
 
         clean_kw = {k: v for k, v in env_kwargs.items() if k in self._ENV_KEYS}
@@ -80,7 +92,21 @@ class SnakeGymEnv(gym.Env):
         seed: Optional[int] = None,
         options: Optional[Dict] = None,
     ) -> Tuple[dict, dict]:
-        """Resets the environment and returns the learning agent's first observation."""
+        """
+        Resets the environment and returns agent 0's first observation.
+
+        Args:
+            seed (int or None): optional seed passed to the inner environment.
+            options (dict or None): unused, kept for gym API compatibility.
+
+        Returns:
+            tuple: (obs, info) where obs is a dict matching observation_space
+            and info is an empty dict.
+
+        Example:
+            env = SnakeGymEnv()
+            obs, info = env.reset(seed=42)
+        """
         if seed is not None:
             self._env.rng = random.Random(seed)
 
@@ -91,7 +117,25 @@ class SnakeGymEnv(gym.Env):
         return raw_obs[0], {}
 
     def step(self, action: int) -> Tuple[dict, float, bool, bool, dict]:
-        """Steps the environment with agent 0's action and returns the gym tuple."""
+        """
+        Steps the environment with agent 0's action.
+
+        Args:
+            action (int): integer in [0, 3] for UP, DOWN, LEFT, RIGHT.
+
+        Returns:
+            tuple: (obs, reward, terminated, truncated, info)
+                obs (dict): new observation for agent 0.
+                reward (float): reward earned this step.
+                terminated (bool): True when the episode is over.
+                truncated (bool): always False (handled inside the env).
+                info (dict): extra data including "opponent_reward".
+
+        Example:
+            env = SnakeGymEnv()
+            env.reset()
+            obs, reward, terminated, truncated, info = env.step(0)
+        """
         assert self._last_raw_obs is not None, "Call reset() before step()."
 
         opp_raw = self._last_raw_obs[1]
@@ -124,18 +168,43 @@ class SnakeGymEnv(gym.Env):
         return obs, reward, terminated, truncated, agent_info
 
     def render(self) -> None:
-        """Forwards the render call to the wrapped multi-agent environment."""
+        """
+        Renders the current game state via the inner environment's pygame window.
+
+        No return value. Requires pygame to be installed.
+        """
         self._env.render()
 
     def close(self) -> None:
-        """Closes any render resources held by the wrapped environment."""
+        """
+        Closes any render resources held by the wrapped environment.
+
+        Safe to call even if render was never used. No return value.
+        """
         self._env.close_render()
 
     def set_opponent(self, fn: Optional[Callable]) -> None:
-        """Swaps the opponent policy without recreating the environment. Pass None for random."""
+        """
+        Swaps the opponent policy without recreating the environment.
+
+        Args:
+            fn (callable or None): new policy for agent 1. Pass None for random actions.
+
+        Example:
+            env = SnakeGymEnv()
+            env.set_opponent(lambda obs: 0)  # always go UP
+        """
         self._opponent_fn = fn
 
     @property
     def history(self) -> List[dict]:
-        """Returns an ordered list of past transitions, oldest first. Empty if history_len is zero."""
+        """
+        Returns past transitions as an ordered list, oldest first.
+
+        Each entry is a dict with keys: obs, action, reward, done.
+        Empty if history_len was set to zero at construction.
+
+        Returns:
+            list of dict: recorded (obs, action, reward, done) tuples.
+        """
         return list(self._history)
